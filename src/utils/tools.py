@@ -30,6 +30,8 @@ def parse_filename(filename):
         filetype_long = "binary"
     elif filetype == "mat":
         filetype_long = "matlab"
+    elif filetype == "abf":
+        filetype_long = "axon-binary-format"
     elif filetype == "pkl":
         filetype_long = "pickle"
     elif filetype in ("txt", "axgt"):
@@ -37,7 +39,7 @@ def parse_filename(filename):
         filetype_long = "tab-delimited-text"
     else:
         raise Exception(
-            "Uknown filetype, can only read '.mat', '.axg*', '.csv', '.pkl'"
+            "Uknown filetype, can only read '.mat', '.abf', '.axg*', '.csv', '.pkl'"
         )
     filename = filename[slash + 1 :]
     return filetype, path, filetype_long, filename

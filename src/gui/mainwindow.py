@@ -93,7 +93,18 @@ class MainWindow(QMainWindow):
     def open_file(self):
         clear_qt_layout(self.central_layout)
         self.create_widgets()
-        self.filename = QFileDialog.getOpenFileName(self)[0]
+        self.filename = QFileDialog.getOpenFileName(
+            self,
+            caption="Open recording",
+            filter=(
+                "All supported (*.abf *.mat *.axgd *.axgx *.pkl);;"
+                "Axon Binary Format (*.abf);;"
+                "Matlab (*.mat);;"
+                "Axograph (*.axgd *.axgx);;"
+                "Pickle (*.pkl);;"
+                "All files (*)"
+            ),
+        )[0]
         if self.filename:
             self.close_tc_frame()
             self.close_fa_frame()
