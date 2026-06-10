@@ -2,7 +2,11 @@ import pickle
 import logging
 
 import numpy as np
-import axographio
+
+try:
+    import axographio
+except ImportError:
+    axographio = None
 from scipy.io import loadmat as scipy_loadmat
 from scipy.io.matlab.mio5 import varmats_from_mat
 
