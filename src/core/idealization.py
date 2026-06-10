@@ -151,7 +151,12 @@ class IdealizationCache:
     def get_n_bins(data):
         n = len(data)
         std = np.std(data)
-        return round(3.49 * std * n ** (1 / 3))
+        # Scott's rule for histogram bin count. Returns NaN/0 when a conductance
+        # level has only a single dwell-time event, so fall back to 10 bins.
+        result = 3.49 * std * n ** (1 / 3)
+        if np.isnan(result) or result == 0:
+            return 10
+        return round(result)
 
     def export_events(self, filepath, time_unit="us", trace_unit="pA"):
         """Export a table of events in the current (idealized) series and
