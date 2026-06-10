@@ -12,7 +12,7 @@ from ..utils import (
     interval_selection,
     round_off_tables,
 )
-from .readdata import load_matlab, load_axo
+from .readdata import load_matlab, load_axo, load_abf
 from .episode import Episode
 
 
@@ -74,6 +74,10 @@ class Recording(dict):
                 command_input_unit=command_input_unit,
                 time_input_unit=time_input_unit,
             )
+        elif filetype == "abf":
+            # ABF files carry their own sampling rate and channel units, so the
+            # unit/sampling-rate values from the open dialog are ignored here.
+            recording = cls._load_from_abf(recording)
         else:
             raise ValueError(f"Cannot load from filetype {filetype}.")
 
@@ -670,6 +674,51 @@ class Recording(dict):
                 input_trace_unit=trace_input_unit,
                 input_piezo_unit=piezo_input_unit,
                 input_command_unit=command_input_unit,
+            )
+            for i in range(n_episodes)
+        ]
+        recording.current_ep_ind = int(initial_index)
+        return recording
+
+    @staticmethod
+    def _load_from_abf(recording):
+        """Load data from an Axon Binary Format (ABF) file.
+
+        Mirrors `_load_from_matlab`, but the ABF file supplies its own sampling
+        rate and channel units, so those are taken from the file rather than
+        from the open dialog. Current is read as pA, command voltage as mV, and
+        the time base in seconds (see `load_abf`). Bilayer recordings have no
+        piezo channel, so the piezo is left as None for every episode.
+        Args:
+            recording - recording object to be filled with data
+        Returns:
+            recording - instance of the Recording class containing the data"""
+        debug_logger.debug(f"from_abf")
+
+        names, time, current, piezo, command, ep_numbers, sampling_rate = load_abf(
+            recording.filename
+        )
+        # The ABF header is authoritative for the sampling rate.
+        recording.sampling_rate = int(sampling_rate)
+        n_episodes = len(current)
+        if not piezo:
+            piezo = [None] * n_episodes
+        if not command:
+            command = [None] * n_episodes
+        if not ep_numbers:
+            ep_numbers = range(n_episodes)
+        initial_index = ep_numbers[0]
+        recording["raw_"] = [
+            Episode(
+                time,
+                current[i],
+                n_episode=int(ep_numbers[i]),
+                piezo=piezo[i],
+                command=command[i],
+                sampling_rate=recording.sampling_rate,
+                input_time_unit="s",
+                input_trace_unit="pA",
+                input_command_unit="mV",
             )
             for i in range(n_episodes)
         ]

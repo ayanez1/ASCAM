@@ -7,11 +7,16 @@ try:
     import axographio
 except ImportError:
     axographio = None
+try:
+    import pyabf
+except ImportError:
+    pyabf = None
 from scipy.io import loadmat as scipy_loadmat
 from scipy.io.matlab.mio5 import varmats_from_mat
 
 
 from ..utils.tools import parse_filename
+from ..constants import CURRENT_UNIT_FACTORS, VOLTAGE_UNIT_FACTORS
 
 
 def load(filename, filetype=False, dtype=None, headerlength=None, fs=None):
@@ -28,6 +33,8 @@ def load(filename, filetype=False, dtype=None, headerlength=None, fs=None):
         output = load_axo(filename)
     elif filetype == "mat":
         output = load_matlab(filename)
+    elif filetype == "abf":
+        output = load_abf(filename)
     elif filetype == "bin":
         output = load_binary(filename, dtype, headerlength, fs)
     # elif filetype == "tdt":
@@ -104,6 +111,84 @@ def load_matlab(filename):
     if command_voltage:
         names.append("Command Voltage [V]")
     return names, time, current, piezo, command_voltage, ep_numbers
+
+
+def load_abf(filename):
+    """Load data from an Axon Binary Format (ABF) file using pyabf.
+
+    Modeled on `load_matlab`. ABF is the native acquisition format for
+    Axon / Molecular Devices hardware. Each ABF "sweep" becomes one ASCAM
+    episode. By convention (see CLAUDE.md) ADC channel 0 holds the membrane
+    current and channel 1 (when present) holds the command voltage. Bilayer
+    single-channel recordings have no piezo channel, so `piezo` is left empty
+    (downstream code then treats the piezo as absent rather than plotting a
+    meaningless flat trace).
+
+    Unlike `.mat` files, an ABF stores its own sampling rate and channel
+    units, so we read those from the file instead of trusting the values typed
+    into the open dialog. Current is normalized to pA and command voltage to
+    mV; for our recordings the channels are already in those units, so the
+    conversion factors are simply 1.
+
+    Arguments:
+        filename [string] - path to the .abf file
+    Returns:
+        names [list of strings] - labels (with units) of the variables present
+        time [1D numpy array] - sample times within a sweep, in seconds
+        current [list of 1D numpy arrays] - current per sweep, in pA
+        piezo [list] - empty list (bilayer recordings have no piezo channel)
+        command [list of 1D numpy arrays] - command voltage per sweep, in mV
+        ep_numbers [list of ints] - sweep numbers (0-indexed)
+        sampling_rate [int] - sampling rate read from the file, in Hz
+    """
+    if pyabf is None:
+        raise ImportError(
+            "pyabf is required to read ABF files but is not installed in this "
+            "environment."
+        )
+
+    abf = pyabf.ABF(filename)
+
+    # ADC channel 0 = current, channel 1 = command voltage (if it was recorded).
+    current_channel = 0
+    command_channel = 1 if abf.channelCount > 1 else None
+
+    # Factor to turn whatever unit the current channel uses into pA. For our
+    # files adcUnits is already "pA", so this is 1; an unrecognised unit falls
+    # back to 1 (i.e. assume the values are already pA).
+    current_unit = abf.adcUnits[current_channel]
+    current_factor = CURRENT_UNIT_FACTORS["pA"] / CURRENT_UNIT_FACTORS.get(
+        current_unit, CURRENT_UNIT_FACTORS["pA"]
+    )
+
+    current = []
+    command = []
+    piezo = []  # bilayer recordings have no piezo channel
+    ep_numbers = []
+
+    # The within-sweep time base (seconds) is shared by every sweep.
+    abf.setSweep(0, channel=current_channel)
+    time = np.array(abf.sweepX)
+
+    if command_channel is not None:
+        command_unit = abf.adcUnits[command_channel]
+        command_factor = VOLTAGE_UNIT_FACTORS["mV"] / VOLTAGE_UNIT_FACTORS.get(
+            command_unit, VOLTAGE_UNIT_FACTORS["mV"]
+        )
+
+    for sweep in abf.sweepList:
+        abf.setSweep(sweep, channel=current_channel)
+        current.append(np.array(abf.sweepY) * current_factor)
+        ep_numbers.append(sweep)
+        if command_channel is not None:
+            abf.setSweep(sweep, channel=command_channel)
+            command.append(np.array(abf.sweepY) * command_factor)
+
+    names = ["Time [s]", "Current [pA]"]
+    if command:
+        names.append("Command Voltage [mV]")
+
+    return names, time, current, piezo, command, ep_numbers, int(abf.sampleRate)
 
 
 def load_binary(filename, dtype, headerlength, fs):
