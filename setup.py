@@ -21,7 +21,7 @@ setup(
     python_requires="==3.10.*",
     install_requires=[
         "pyqtgraph>=0.11.0,<=0.12.4",
-        "PySide2==5.15.2.1",
+        "PySide2>=5.15",
         "numpy==1.24.*",
         "pandas==1.5.*",
         "scipy==1.10.*",
