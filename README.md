@@ -5,6 +5,60 @@
 
 ASCAM can be used to browse, organize and analyze episodic recordings of single ion channel currents.
 
+---
+
+# Additions in this fork
+
+> **Note:** This section documents changes made in **this fork** for analyzing bilayer single-channel recordings (e.g. ionotropic glutamate receptors reconstituted in lipid bilayers). Everything *outside* this section is the original ASCAM README written by the Plested lab and is unchanged. The original baseline/filter/idealization tools all still work exactly as documented below.
+
+This fork extends ASCAM to read **ABF (Axon Binary Format)** files natively and adds filtering and baseline-correction tools based on standard single-channel methods (Colquhoun & Sigworth, *Single-Channel Recording*, 2e, ch. 19).
+
+### 1. Native ABF file reading
+
+`File > Open file` now accepts `.abf` files directly (no conversion to `.mat` needed).
+
+- ADC channel 0 is loaded as **current (pA)**, channel 1 (if present) as **command voltage (mV)**.
+- Each ABF **sweep** becomes one ASCAM episode; a continuous gap-free recording loads as a single long episode.
+- The **sampling rate is read from the file**, not from the open dialog (e.g. a 51.2 µs interval reports as 19531 Hz, which is correct — the value typed in the dialog is ignored for ABF).
+- Bilayer recordings have no piezo channel, so the piezo is treated as absent.
+
+### 2. 8-pole Bessel filter (with live resolution readout)
+
+`Processing > Filter` now offers **`Bessel`** alongside Gaussian and Chung-Kennedy.
+
+- Enter the **cutoff** (Hz) — interpreted as the true **−3 dB** point — and the number of **poles** (default 8). The filter is applied **zero-phase** (forward–backward), so it does not shift the timing of transitions.
+- A **live readout** under the cutoff field shows the resulting **rise time** `T_r = 0.3321/f_c` and **dead time** `T_d = 0.179/f_c`. The dead time is the shortest event the filter can resolve, so to resolve an event of width `w` choose `f_c ≳ 0.179/w` (e.g. a 0.5 ms event needs `f_c ≳ ~360 Hz`). The same readout was added to the Gaussian filter.
+- It warns if the cutoff exceeds the Nyquist frequency or 1/5 of the sampling rate.
+
+> Note on filter choice: for offline zero-phase work the existing **Gaussian** filter is the field standard and is generally preferable; the Bessel option is provided for matching an analog hardware response or publication convention.
+
+### 3. Running-percentile baseline correction (drift + jumps)
+
+`Processing > Baseline correction` now offers a **`Running Percentile`** method, intended for continuous recordings whose baseline both **drifts slowly** and **jumps suddenly** (as bilayer membrane-potential recordings do).
+
+How it works: it subtracts a sliding-window percentile of the trace, which tracks the closed-channel level even as it drifts (channel openings are too brief to dominate the percentile). Optionally it first locates sudden baseline jumps and corrects each segment independently so the baseline **snaps at jumps** instead of smearing across them.
+
+Parameters:
+
+- **Window** — sliding-window duration (default 0.5 s). Must be longer than your longest opening but shorter than the drift timescale.
+- **Percentile** — sits on the closed (baseline) level. **50 (the median) is the right default** and is unbiased for either current polarity when the channel is open less than half the time. Only shift it toward the closed side at high open probability (raise it for inward/negative-going openings, lower it for outward/positive-going).
+- **Detect baseline jumps (PELT)** — tick to automatically find sudden baseline jumps (via the `ruptures` PELT changepoint algorithm) and correct piecewise. The number of jumps found is printed to the terminal log; raise **Jump sensitivity** if small real jumps are missed.
+
+Notes:
+- The `Piezo`/`Intervals` selection row is disabled for this method, because the baseline is estimated from the whole trace.
+- **Open-channel amplitudes are preserved** relative to baseline: the correction shifts the open and closed levels together, so the amplitude (open − closed) is unchanged — including across a corrected jump.
+
+### Setup notes (Apple Silicon / macOS)
+
+This fork was made to build and run on Apple Silicon in a Python 3.10 conda env named `ASCAM`:
+
+- Relaxed the strict `PySide2` version pin and install PySide2 from **conda-forge** (no PyPI wheel exists for Apple Silicon).
+- Removed the `axographio` dependency (its source distribution does not build on Apple Silicon); `.axgx/.axgd` reading is therefore unavailable in this fork.
+- Fixed a NaN crash in the dwell-time histogram bin-count calculation.
+- Extra packages used by the additions: `pip install pyabf ruptures`.
+
+---
+
 ## Installation
 A straightforward installation can be achieved by first installing Anaconda or miniconda. At the time of writing, a working version for Mac is https://repo.anaconda.com/archive/Anaconda3-5.3.0-MacOSX-x86_64.pkg
 
