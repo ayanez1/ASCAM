@@ -380,41 +380,59 @@ def running_percentile_baseline(
 def detect_baseline_jumps(
     signal,
     sampling_rate,
-    percentile=50,
-    downsample_hz=100,
+    closed_percentile=None,
+    block_duration=0.1,
     sensitivity=1.0,
-    min_duration=0.05,
+    min_duration=0.3,
     min_jump_size=None,
+    max_blocks=50000,
 ):
     """Detect sudden baseline jumps with the PELT changepoint algorithm.
 
     To stay fast and to decouple detection from changes in open probability, the
     algorithm does not work on the raw signal. Instead it builds a robust
-    closed-level series by taking the given percentile of the signal in
-    consecutive blocks (one block per 1/`downsample_hz` seconds) and runs PELT
-    on that. A baseline jump shifts the closed level; merely having more or
-    longer openings does not, so it is not mistaken for a jump.
+    closed-level series by taking a percentile of the signal in consecutive
+    blocks (each `block_duration` seconds long) and runs PELT on that. A baseline
+    jump shifts the closed level; merely having more or longer openings does not,
+    so it is not mistaken for a jump.
 
-    PELT with a piecewise-constant (L2) cost will try to approximate smooth
-    drift with a staircase of small steps, so PELT alone over-segments a
-    drifting baseline. To separate genuine jumps from drift, PELT is used only
-    to propose candidate change points, and a candidate is kept only if the
-    closed level actually steps across it by at least a magnitude threshold.
-    Drift produces sub-threshold steps and is rejected; a real multi-pA jump is
-    kept.
+    Two details make this robust to channel openings:
+        - The block is long (~0.1 s) so that a single opening, which lasts only
+          tens of ms, cannot fill an entire block.
+        - The percentile is taken on the *closed* side of the amplitude
+          distribution (not the median), so even a block that is partly open
+          still reports the closed level. The side is chosen automatically from
+          the trace's skew (openings pull the mean toward themselves relative to
+          the closed median): the larger tail of a drift-removed residual marks
+          the opening direction, so a larger negative tail => inward openings =>
+          closed level is the upper side (high percentile), and vice versa. A
+          constant percentile bias cancels because only *changes* in
+          the closed level are used. (This assumes the channel is open less than
+          half the time, which holds for single-channel data.)
+
+    PELT with a piecewise-constant (L2) cost will try to approximate smooth drift
+    with a staircase of small steps. To separate genuine jumps from drift, PELT
+    is run with a penalty tied to the jump-magnitude threshold so it only pursues
+    changes on the order of a real jump (this also keeps it fast: a low penalty
+    defeats PELT's pruning and makes it roughly quadratic). Each surviving
+    candidate is then kept only if the closed level actually steps across it by
+    at least the magnitude threshold.
 
     Parameters:
         signal [1D array] - the current trace (original sampling rate)
         sampling_rate [float] - sampling rate in Hz
-        percentile [float] - percentile tracking the closed level (match the one
-            used for the baseline correction; see running_percentile_baseline)
-        downsample_hz [float] - rate of the closed-level series PELT runs on
+        closed_percentile [float or None] - percentile tracking the closed level;
+            if None it is chosen automatically (~75 or ~25) from the trace skew
+        block_duration [float] - block length in seconds for the closed-level
+            series (must exceed the longest opening)
         sensitivity [float] - scales the automatic magnitude threshold; larger
             values detect more (smaller) jumps
         min_duration [float] - minimum segment duration in seconds
         min_jump_size [float or None] - minimum step in signal units to count as
-            a jump; if None an automatic threshold (~6 robust sigma of the
-            closed level, scaled by sensitivity) is used
+            a jump; if None an automatic threshold (~4 robust sigma of the raw
+            signal, scaled by sensitivity) is used
+        max_blocks [int] - cap on the closed-level series length; blocks are
+            grown beyond block_duration if needed so PELT input stays bounded
     Returns:
         jump_indices [1D int array] - jump locations as sample indices in the
             original sampling rate (empty if none are found)"""
@@ -422,14 +440,32 @@ def detect_baseline_jumps(
     import ruptures
 
     signal = np.asarray(signal, dtype=float)
-    factor = max(1, int(round(sampling_rate / downsample_hz)))
+
+    # block size in samples: long enough to exclude openings, grown further if
+    # needed so the closed-level series (PELT input) stays bounded in length
+    factor = max(1, int(round(block_duration * sampling_rate)))
+    if signal.size // factor > max_blocks:
+        factor = int(np.ceil(signal.size / max_blocks))
     n_blocks = signal.size // factor
     if n_blocks < 4:
         return np.array([], dtype=int)
 
-    # robust closed-level series: chosen percentile within each block
     blocks = signal[: n_blocks * factor].reshape(n_blocks, factor)
-    closed = np.percentile(blocks, percentile, axis=1)
+
+    # pick the percentile on the closed side of the distribution (see docstring).
+    # determine the opening direction from a *drift-removed* residual (signal
+    # minus each block's median) so the choice is not confused by baseline drift
+    # or jumps, which would dominate a global mean-vs-median comparison.
+    if closed_percentile is None:
+        residual = blocks - np.median(blocks, axis=1, keepdims=True)
+        low_tail = abs(np.percentile(residual, 2))
+        high_tail = abs(np.percentile(residual, 98))
+        if low_tail >= high_tail:
+            closed_percentile = 75.0  # larger negative tail: inward openings
+        else:
+            closed_percentile = 25.0  # larger positive tail: outward openings
+
+    closed = np.percentile(blocks, closed_percentile, axis=1)
 
     # robust noise scale of the *raw* signal (MAD of its first difference).
     # A jump worth correcting is several pA, i.e. a few times this noise; the
@@ -447,16 +483,11 @@ def detect_baseline_jumps(
     else:
         threshold = float(min_jump_size)
 
-    # PELT proposes candidates; a low penalty keeps the real jump among them.
-    # Penalty is scaled to the closed-level noise so candidates are plentiful.
-    min_size = max(1, int(round(min_duration * downsample_hz)))
-    closed_diffs = np.diff(closed)
-    closed_sigma = (
-        1.4826 * np.median(np.abs(closed_diffs - np.median(closed_diffs)))
-        if closed_diffs.size
-        else 0.0
-    )
-    penalty = max((closed_sigma ** 2) * np.log(n_blocks), 1e-12 * (np.ptp(closed) ** 2 + 1.0))
+    # PELT proposes candidates. The penalty is tied to the jump-magnitude
+    # threshold (min_size * threshold**2) so PELT only pursues changes on the
+    # order of a real jump; this prunes aggressively and keeps it near-linear.
+    min_size = max(1, int(round(min_duration * sampling_rate / factor)))
+    penalty = max(min_size * threshold ** 2, 1e-30)
     algo = ruptures.Pelt(model="l2", min_size=min_size).fit(closed.reshape(-1, 1))
     candidates = [b for b in algo.predict(pen=penalty) if 0 < b < n_blocks]
 

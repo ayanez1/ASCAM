@@ -168,10 +168,11 @@ class Episode:
         Returns the detected jump indices (or an empty array)."""
 
         if detect_jumps:
+            # detection auto-derives its own closed-side percentile from the
+            # trace, independent of the baseline-correction percentile
             boundaries = detect_baseline_jumps(
                 self.trace,
                 sampling_rate,
-                percentile=percentile,
                 sensitivity=jump_sensitivity,
             )
         else:
