@@ -16,6 +16,7 @@ from PySide2.QtWidgets import (
 from ..utils import clear_qt_layout, string_to_list, get_dict_key_index
 from ..utils.widgets import VerticalContainerWidget
 from ..constants import TIME_UNIT_FACTORS
+from ..core.filtering import filter_risetime, filter_deadtime
 
 
 debug_logger = logging.getLogger("ascam.debug")
@@ -29,7 +30,7 @@ class FilterFrame(QDialog):
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
-        self.filter_options = ["Gaussian", "Chung-Kennedy"]
+        self.filter_options = ["Gaussian", "Chung-Kennedy", "Bessel"]
 
         self.create_widgets()
         self.freq_entry.setFocus()
@@ -63,11 +64,24 @@ class FilterFrame(QDialog):
         except AttributeError:
             pass
         self.resize(self.sizeHint())
+        # the resolution readout only exists for the Gaussian/Bessel branches;
+        # drop the stale reference so update_resolution_readout() stays inert
+        # for the Chung-Kennedy branch
+        self.resolution_label = None
         if self.filter_options[index] == "Gaussian":
             debug_logger.debug("Creating gaussian input widgets")
             self.selection_layout = QFormLayout()
             self.freq_entry = QLineEdit("1000")
             self.selection_layout.addRow("Frequency [Hz]", self.freq_entry)
+            self.add_resolution_readout()
+        elif self.filter_options[index] == "Bessel":
+            debug_logger.debug("Creating Bessel input widgets")
+            self.selection_layout = QFormLayout()
+            self.freq_entry = QLineEdit("1000")
+            self.selection_layout.addRow("Cutoff [Hz]", self.freq_entry)
+            self.pole_entry = QLineEdit("8")
+            self.selection_layout.addRow("Poles", self.pole_entry)
+            self.add_resolution_readout()
         else:
             debug_logger.debug("creating CK-filter input widgets")
             self.selection_layout = QFormLayout()
@@ -84,10 +98,64 @@ class FilterFrame(QDialog):
         self.layout.insertLayout(1, self.selection_layout)
         self.resize(self.sizeHint())  # both resizes are necessary
 
+    def add_resolution_readout(self):
+        """Add a live rise-time/dead-time readout below the cutoff field and
+        keep it updated as the user edits the cutoff frequency."""
+        self.resolution_label = QLabel()
+        self.resolution_label.setWordWrap(True)
+        self.selection_layout.addRow(self.resolution_label)
+        self.freq_entry.textChanged.connect(self.update_resolution_readout)
+        self.update_resolution_readout()
+
+    def update_resolution_readout(self):
+        """Show the filter time resolution implied by the current cutoff.
+
+        Uses T_r = 0.3321/f_c and T_d = 0.179/f_c (Colquhoun & Sigworth ch. 19),
+        which describe both the Gaussian and the many-pole Bessel filter. The
+        dead time T_d is the shortest event the filter can resolve at a
+        half-amplitude threshold."""
+        if not getattr(self, "resolution_label", None):
+            return
+        # fall back to a sensible default rate if no recording is loaded yet
+        data = getattr(self.main, "data", None)
+        sampling_rate = getattr(data, "sampling_rate", 4e4) or 4e4
+        nyquist = sampling_rate / 2
+        try:
+            cutoff = float(self.freq_entry.text())
+        except ValueError:
+            self.resolution_label.setText("Enter a cutoff frequency in Hz")
+            return
+        if cutoff <= 0:
+            self.resolution_label.setText("Cutoff frequency must be positive")
+            return
+        if cutoff >= nyquist:
+            self.resolution_label.setText(
+                f"Cutoff must be below the Nyquist frequency ({nyquist:g} Hz)"
+            )
+            return
+        rise_ms = filter_risetime(cutoff) * 1e3
+        dead_ms = filter_deadtime(cutoff) * 1e3
+        dead_samples = filter_deadtime(cutoff) * sampling_rate
+        message = (
+            f"Rise time {rise_ms:.3g} ms · dead time {dead_ms:.3g} ms "
+            f"({dead_samples:.1f} samples)\n"
+            f"→ resolves events ≳ {dead_ms:.3g} ms"
+        )
+        if cutoff > sampling_rate / 5:
+            message += (
+                f"\n⚠ cutoff above 1/5 of the sampling rate "
+                f"({sampling_rate / 5:g} Hz): consider sampling faster"
+            )
+        self.resolution_label.setText(message)
+
     def ok_clicked(self):
         filter_method = self.filter_options[self.method_box.currentIndex()]
         if filter_method == "Gaussian":
             self.main.data.gauss_filter_series(float(self.freq_entry.text()))
+        elif filter_method == "Bessel":
+            self.main.data.bessel_filter_series(
+                float(self.freq_entry.text()), int(self.pole_entry.text())
+            )
         elif filter_method == "Chung-Kennedy":
             self.main.data.CK_filter_series(
                 window_lengths=[int(x) for x in self.window_entry.text().split()],

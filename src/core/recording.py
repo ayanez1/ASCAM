@@ -233,6 +233,28 @@ class Recording(dict):
             episode.gauss_filter_episode(filter_freq, self.sampling_rate)
         self.current_datakey = new_datakey
 
+    def bessel_filter_series(self, filter_freq, n_poles=8):
+        """Filter the current series using a zero-phase Bessel filter."""
+        ana_logger.info(
+            f"Bessel filtering series '{self.current_datakey}'\n"
+            f"with frequency {filter_freq} and {n_poles} poles\n"
+            f"sampling_rate is {self.sampling_rate}"
+        )
+
+        fdatakey = f"BESSEL{filter_freq}_"
+        if self.current_datakey == "raw_":
+            # if its the first operation drop the 'raw-'
+            new_datakey = fdatakey
+        else:
+            # if operations have been done before combine the names
+            new_datakey = self.current_datakey + fdatakey
+        self[new_datakey] = copy.deepcopy(self.series)
+        for episode in self[new_datakey]:
+            episode.bessel_filter_episode(
+                filter_freq, n_poles, self.sampling_rate
+            )
+        self.current_datakey = new_datakey
+
     def CK_filter_series(
         self,
         window_lengths,

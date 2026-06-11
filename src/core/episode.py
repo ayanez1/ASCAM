@@ -3,7 +3,7 @@ import numpy as np
 
 from ..utils import piezo_selection
 from ..constants import CURRENT_UNIT_FACTORS, VOLTAGE_UNIT_FACTORS, TIME_UNIT_FACTORS
-from .filtering import gaussian_filter, ChungKennedyFilter
+from .filtering import gaussian_filter, bessel_filter, ChungKennedyFilter
 from .analysis import baseline_correction, detect_first_activation, Idealizer, detect_first_events
 
 
@@ -86,6 +86,19 @@ class Episode:
             signal=self.trace,
             filter_frequency=filter_frequency,
             sampling_rate=sampling_rate,
+        )
+
+    def bessel_filter_episode(
+        self, filter_frequency=1e3, n_poles=8, sampling_rate=4e4
+    ):
+        """Replace the current trace of the episode by the Bessel filtered
+        version of itself (zero-phase, n_poles low-pass)."""
+
+        self.trace = bessel_filter(
+            signal=self.trace,
+            filter_frequency=filter_frequency,
+            sampling_rate=sampling_rate,
+            n_poles=n_poles,
         )
 
     def CK_filter_episode(

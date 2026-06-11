@@ -1,4 +1,45 @@
 import numpy as np
+import scipy.signal
+
+
+# Time-resolution constants for a Gaussian (or many-pole Bessel) low-pass filter,
+# from Colquhoun & Sigworth, "Fitting and Statistical Analysis of Single-Channel
+# Records," in Single-Channel Recording (Sakmann & Neher, eds.), 2nd ed., ch. 19.
+# A Bessel filter of four or more poles is well approximated by a Gaussian, so
+# these relationships apply to the 8-pole Bessel filter below as well.
+RISETIME_CONSTANT = 0.3321  # T_r = 0.3321 / f_c   (eq. 12)
+DEADTIME_CONSTANT = 0.179  # T_d = 0.179 / f_c    (eq. 19)
+
+
+def filter_risetime(filter_frequency):
+    """Return the 10-90% rise time (seconds) of a low-pass filter.
+
+    Defined as T_r = 0.3321 / f_c (Colquhoun & Sigworth eq. 12), where f_c is
+    the -3 dB cutoff in Hz. T_r is roughly the minimum pulse length to which the
+    filter gives a near full-amplitude response.
+
+    Parameters:
+        filter_frequency [float] - the -3 dB cutoff frequency in Hz
+    Returns:
+        rise time in seconds"""
+
+    return RISETIME_CONSTANT / filter_frequency
+
+
+def filter_deadtime(filter_frequency):
+    """Return the half-amplitude dead time (seconds) of a low-pass filter.
+
+    Defined as T_d = 0.179 / f_c (Colquhoun & Sigworth eq. 19), where f_c is the
+    -3 dB cutoff in Hz. Events shorter than T_d never reach the half-amplitude
+    threshold after filtering and are therefore missed entirely. Equivalently,
+    to resolve a pulse of width w one needs f_c >= 0.179 / w.
+
+    Parameters:
+        filter_frequency [float] - the -3 dB cutoff frequency in Hz
+    Returns:
+        dead time in seconds"""
+
+    return DEADTIME_CONSTANT / filter_frequency
 
 
 def apply_filter(signal, window):
@@ -57,6 +98,62 @@ def gaussian_window(filter_frequency, sampling_rate=4e4):
 def gaussian_filter(signal, filter_frequency, sampling_rate=4e4):
     window = gaussian_window(filter_frequency, sampling_rate)
     output = apply_filter(signal, window)
+    return output
+
+
+def bessel_filter(signal, filter_frequency, sampling_rate=4e4, n_poles=8):
+    """Apply a zero-phase Bessel low-pass filter to a signal.
+
+    The Bessel filter is the standard low-pass for single-channel work because
+    its step response has essentially no overshoot or ringing, so it does not
+    create artificial sub-conductance "wiggles" at channel transitions.
+
+    The filter is applied forward and backward (scipy.signal.sosfiltfilt) so it
+    is zero-phase: it introduces no time shift, which preserves the timing of
+    transitions needed for accurate dwell-time measurement.
+
+    Two implementation details that matter for the cutoff to mean what the user
+    expects (the -3 dB point, as in Colquhoun & Sigworth ch. 19):
+
+    - The filter is designed in second-order-sections form (output="sos") rather
+      than as transfer-function coefficients. For an 8-pole filter at the low
+      normalized cutoffs typical here (e.g. a few hundred Hz at 20-50 kHz), the
+      transfer-function form is numerically unstable, while sos is robust.
+    - Forward-backward filtering passes the signal through the filter twice, which
+      lowers the effective -3 dB point to f_c / sqrt(2). We therefore design at
+      filter_frequency * sqrt(2) so the *effective* -3 dB cutoff equals the value
+      the user requested.
+
+    Parameters:
+        signal [1D array] - the trace to filter
+        filter_frequency [float] - desired -3 dB cutoff frequency in Hz
+        sampling_rate [float] - sampling rate in Hz
+        n_poles [int] - number of filter poles (order); 8 by default
+    Returns:
+        filtered signal [1D array], same length as the input"""
+
+    nyquist = sampling_rate / 2
+    if not 0 < filter_frequency < nyquist:
+        raise ValueError(
+            f"Bessel cutoff frequency must be between 0 and the Nyquist "
+            f"frequency ({nyquist:g} Hz), got {filter_frequency:g} Hz."
+        )
+
+    # compensate for the double (forward-backward) pass so that the requested
+    # frequency is the true -3 dB point of the overall zero-phase filter
+    design_frequency = filter_frequency * np.sqrt(2)
+    # keep the design frequency below Nyquist even after compensation
+    design_frequency = min(design_frequency, 0.99 * nyquist)
+
+    sos = scipy.signal.bessel(
+        n_poles,
+        design_frequency,
+        btype="low",
+        norm="mag",  # place the -3 dB point at the design frequency
+        output="sos",  # numerically stable for high pole counts
+        fs=sampling_rate,
+    )
+    output = scipy.signal.sosfiltfilt(sos, signal)
     return output
 
 
