@@ -182,7 +182,7 @@ class BaselineFrame(QDialog):
 
 class BaselineWidget(VerticalContainerWidget):
     def __init__(self, main, dialog):
-        self.method_options = ["Polynomial", "Offset"]
+        self.method_options = ["Polynomial", "Offset", "Running Percentile"]
         self.selection_options = ["Piezo", "Intervals"]
 
         super().__init__(main)
@@ -212,15 +212,70 @@ class BaselineWidget(VerticalContainerWidget):
         self.add_row(ok_button, cancel_button)
 
     def choose_correction_method(self, index):
-        if self.method_options[index] == "Polynomial":
-            self.selection_layout = QFormLayout()
+        # remove any method-specific widgets created for a previous method
+        try:
+            clear_qt_layout(self.selection_layout)
+        except AttributeError:
+            pass
+
+        method = self.method_options[index]
+        self.selection_layout = QFormLayout()
+        if method == "Polynomial":
             debug_logger.debug("Creating polynomial input widgets")
             self.degree_entry = QLineEdit("1")
             self.selection_layout.addRow("Degree", self.degree_entry)
-            self.layout.insertLayout(1, self.selection_layout)
-        else:
-            debug_logger.debug("Destroying polynomial input widgets")
-            clear_qt_layout(self.selection_layout)
+        elif method == "Running Percentile":
+            debug_logger.debug("Creating running-percentile input widgets")
+            window_layout = QHBoxLayout()
+            self.window_entry = QLineEdit("0.5")
+            self.window_unit_entry = QComboBox()
+            self.window_unit_entry.addItems(list(TIME_UNIT_FACTORS.keys()))
+            self.window_unit_entry.setCurrentIndex(
+                get_dict_key_index(TIME_UNIT_FACTORS, "s")
+            )
+            window_layout.addWidget(self.window_entry)
+            window_layout.addWidget(self.window_unit_entry)
+            self.selection_layout.addRow("Window", window_layout)
+
+            self.percentile_entry = QLineEdit("50")
+            self.percentile_entry.setToolTip(
+                "Percentile tracking the closed (baseline) level.\n"
+                "50 (median) is unbiased when the channel is open less\n"
+                "than half the time. Shift toward the closed side only at\n"
+                "high open probability: up for inward (negative-going)\n"
+                "openings, down for outward (positive-going)."
+            )
+            self.selection_layout.addRow("Percentile", self.percentile_entry)
+
+            self.detect_jumps_check = QCheckBox("Detect baseline jumps (PELT)")
+            self.detect_jumps_check.setChecked(False)
+            self.selection_layout.addRow(self.detect_jumps_check)
+
+            self.sensitivity_entry = QLineEdit("1.0")
+            self.sensitivity_entry.setToolTip(
+                "Scales the jump-detection penalty; higher values detect "
+                "fewer jumps."
+            )
+            self.selection_layout.addRow("Jump sensitivity", self.sensitivity_entry)
+        # "Offset" needs no extra widgets
+        self.layout.insertLayout(1, self.selection_layout)
+
+        # the Piezo/Intervals selection only applies to the fitted corrections;
+        # the running percentile estimates the baseline from the whole trace
+        self.set_selection_enabled(method != "Running Percentile")
+
+    def set_selection_enabled(self, enabled):
+        """Enable or disable the Piezo/Intervals selection row (it does not
+        apply to the running-percentile method)."""
+        if not hasattr(self, "selection_box"):
+            # selection widgets are created after the first method call
+            return
+        self.selection_box.setEnabled(enabled)
+        if hasattr(self, "method_layout"):
+            for i in range(self.method_layout.count()):
+                widget = self.method_layout.itemAt(i).widget()
+                if widget is not None:
+                    widget.setEnabled(enabled)
 
     def choose_selection_method(self, index):
         try:
@@ -273,32 +328,43 @@ class BaselineWidget(VerticalContainerWidget):
 
     def ok_clicked(self):
         method = self.method_options[self.method_box.currentIndex()]
-        print(method)
-        if method != "Offset":
-            degree = int(self.degree_entry.text())
+        if method == "Running Percentile":
+            window_unit = self.window_unit_entry.currentText()
+            window_duration = (
+                float(self.window_entry.text()) / TIME_UNIT_FACTORS[window_unit]
+            )
+            self.main.data.baseline_correction_running_percentile(
+                window_duration=window_duration,
+                percentile=float(self.percentile_entry.text()),
+                detect_jumps=self.detect_jumps_check.isChecked(),
+                jump_sensitivity=float(self.sensitivity_entry.text()),
+            )
         else:
-            degree = None
-        selection = self.selection_options[self.selection_box.currentIndex()]
-        if selection == "Piezo":
-            intervals = None
-            deviation = float(self.deviation_entry.text())
-            active = self.active_checkbox.isChecked()
-            time_unit = None
-        elif selection == "Intervals":
-            active = None
-            deviation = None
-            intervals = string_to_list(self.interval_entry.text())
-            time_unit = self.time_unit_entry.currentText()
+            if method != "Offset":
+                degree = int(self.degree_entry.text())
+            else:
+                degree = None
+            selection = self.selection_options[self.selection_box.currentIndex()]
+            if selection == "Piezo":
+                intervals = None
+                deviation = float(self.deviation_entry.text())
+                active = self.active_checkbox.isChecked()
+                time_unit = None
+            elif selection == "Intervals":
+                active = None
+                deviation = None
+                intervals = string_to_list(self.interval_entry.text())
+                time_unit = self.time_unit_entry.currentText()
 
-        self.main.data.baseline_correction(
-            method=method,
-            degree=degree,
-            intervals=intervals,
-            selection=selection,
-            deviation=deviation,
-            active=active,
-            time_unit=time_unit,
-        )
+            self.main.data.baseline_correction(
+                method=method,
+                degree=degree,
+                intervals=intervals,
+                selection=selection,
+                deviation=deviation,
+                active=active,
+                time_unit=time_unit,
+            )
         self.main.ep_frame.update_combo_box()
         self.main.plot_frame.plot_all()
         self.dialog.close()

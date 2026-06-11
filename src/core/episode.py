@@ -4,7 +4,14 @@ import numpy as np
 from ..utils import piezo_selection
 from ..constants import CURRENT_UNIT_FACTORS, VOLTAGE_UNIT_FACTORS, TIME_UNIT_FACTORS
 from .filtering import gaussian_filter, bessel_filter, ChungKennedyFilter
-from .analysis import baseline_correction, detect_first_activation, Idealizer, detect_first_events
+from .analysis import (
+    baseline_correction,
+    running_percentile_baseline,
+    detect_baseline_jumps,
+    detect_first_activation,
+    Idealizer,
+    detect_first_events,
+)
 
 
 class Episode:
@@ -144,6 +151,41 @@ class Episode:
             active=active,
             deviation=deviation,
         )
+
+    def baseline_correct_running_percentile(
+        self,
+        window_duration,
+        percentile=50,
+        detect_jumps=False,
+        jump_sensitivity=1.0,
+        sampling_rate=4e4,
+    ):
+        """Apply a running-percentile baseline correction to the episode.
+
+        If `detect_jumps` is set, sudden baseline jumps are located with PELT
+        first and the percentile baseline is estimated independently within each
+        segment, so the correction snaps at jumps and tracks drift between them.
+        Returns the detected jump indices (or an empty array)."""
+
+        if detect_jumps:
+            boundaries = detect_baseline_jumps(
+                self.trace,
+                sampling_rate,
+                percentile=percentile,
+                sensitivity=jump_sensitivity,
+            )
+        else:
+            boundaries = None
+
+        self.trace = running_percentile_baseline(
+            time=self.time,
+            signal=self.trace,
+            sampling_rate=sampling_rate,
+            window_duration=window_duration,
+            percentile=percentile,
+            segment_boundaries=boundaries,
+        )
+        return boundaries if boundaries is not None else np.array([], dtype=int)
 
     def check_standarddeviation_all(self, stdthreshold=5e-13):
         """Check the standard deviation of the episode against a reference

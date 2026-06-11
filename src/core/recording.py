@@ -213,6 +213,51 @@ class Recording(dict):
         self.current_datakey = new_datakey
         debug_logger.debug("keys of the recording are now {}".format(self.keys()))
 
+    def baseline_correction_running_percentile(
+        self,
+        window_duration,
+        percentile=50,
+        detect_jumps=False,
+        jump_sensitivity=1.0,
+    ):
+        """Apply a running-percentile baseline correction to the current series.
+
+        Tracks a drifting closed-channel baseline by subtracting a sliding
+        percentile of the trace. When `detect_jumps` is set, sudden baseline
+        jumps are located with PELT and corrected piecewise. `window_duration`
+        is in seconds; `percentile` should sit on the closed level (50/median
+        for low open probability, shifted toward the closed side as Po grows)."""
+
+        if self.current_datakey == "raw_":
+            # if its the first operation drop the 'raw_'
+            new_datakey = "RPBC_"
+        else:
+            # if operations have been done before combine the names
+            new_datakey = self.current_datakey + "RPBC_"
+        ana_logger.info(
+            f"running-percentile baseline correction on series "
+            f"'{self.current_datakey}'\n"
+            f"window {window_duration} s, percentile {percentile}\n"
+            f"detect_jumps is {detect_jumps} (sensitivity {jump_sensitivity})\n"
+            f"sampling rate of this recording is {self.sampling_rate}"
+        )
+        self[new_datakey] = copy.deepcopy(self.series)
+        for episode in self[new_datakey]:
+            jumps = episode.baseline_correct_running_percentile(
+                window_duration=window_duration,
+                percentile=percentile,
+                detect_jumps=detect_jumps,
+                jump_sensitivity=jump_sensitivity,
+                sampling_rate=self.sampling_rate,
+            )
+            if detect_jumps:
+                ana_logger.info(
+                    f"episode {episode.n_episode}: detected {len(jumps)} "
+                    f"baseline jump(s)"
+                )
+        self.current_datakey = new_datakey
+        debug_logger.debug("keys of the recording are now {}".format(self.keys()))
+
     def gauss_filter_series(self, filter_freq):
         """Filter the current series using a gaussian filter"""
         ana_logger.info(
