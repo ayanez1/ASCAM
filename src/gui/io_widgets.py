@@ -219,11 +219,7 @@ class OpenFileEntryWidget(EntryWidget):
             piezo_input_unit=self.piezo_unit,
             command_input_unit=self.command_unit,
         )
-        self.main.ep_frame.ep_list.populate()
-        self.main.ep_frame.update_combo_box()
-        self.main.ep_frame.setFocus()
-        self.main.plot_frame.plot_all()
-        self.main.setWindowTitle(f"cuteSCAM {self.main.filename}")
+        self.main.finish_loading()
         self.dialog.close()
         self.close()
 

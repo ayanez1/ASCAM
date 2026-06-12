@@ -109,8 +109,22 @@ class MainWindow(QMainWindow):
             self.close_tc_frame()
             self.close_fa_frame()
             debug_logger.debug(f"filename is {self.filename}")
-            _, _, _, filename_short = parse_filename(self.filename)
-            OpenFileDialog(self, filename=filename_short)
+            filetype, _, _, filename_short = parse_filename(self.filename)
+            # ABF files and saved .pkl sessions carry their own sampling rate
+            # and units, so skip the metadata dialog and load directly.
+            if filetype in ("abf", "pkl"):
+                self.data = Recording.from_file(filename=self.filename)
+                self.finish_loading()
+            else:
+                OpenFileDialog(self, filename=filename_short)
+
+    def finish_loading(self):
+        """Refresh the UI after self.data has been populated by a load."""
+        self.ep_frame.ep_list.populate()
+        self.ep_frame.update_combo_box()
+        self.ep_frame.setFocus()
+        self.plot_frame.plot_all()
+        self.setWindowTitle(f"cuteSCAM {self.filename}")
 
     def save_to_file(self):
         filename = QFileDialog.getSaveFileName(
