@@ -165,12 +165,15 @@ class OpenFileEntryWidget(EntryWidget):
         self.main = main
         self.filename = filename
         self.dialog = dialog
+        # Defaults match the lab's typical ABF recordings (and the .mat segments
+        # produced by split_abf_by_voltage.py): current in pA, command and piezo
+        # in mV, time in seconds. The user can still change any of them.
         super().__init__(
             main,
             default_time_unit="s",
-            default_trace_unit="A",
-            default_piezo_unit="V",
-            default_command_unit="V",
+            default_trace_unit="pA",
+            default_piezo_unit="mV",
+            default_command_unit="mV",
         )
 
     def create_widgets(self):
@@ -179,7 +182,7 @@ class OpenFileEntryWidget(EntryWidget):
         self.add_row(file_button, self.file_name_label)
 
         sampling_label = QLabel("Sampling rate [Hz]")
-        self.sampling_entry = QLineEdit("40000")
+        self.sampling_entry = QLineEdit("20000")
         self.add_row(sampling_label, self.sampling_entry)
 
         t_unit_label = QLabel("Time unit")
