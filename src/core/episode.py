@@ -44,16 +44,31 @@ class Episode:
             filterType [string] - type of filter used"""
 
         # units when given input
+        #
+        # The data channels (trace/piezo/command) are stored as float32 to halve
+        # their memory footprint: a 20-min recording at 20 kHz is ~24M samples
+        # per channel, and every processing step deep-copies the whole series, so
+        # the saving compounds. float32 keeps ~7 significant digits, far more than
+        # the ~12-bit ADC resolution of the raw data, so amplitudes are unaffected.
+        #
+        # Time, however, stays float64: at t ~ 1200 s a float32 can only resolve
+        # ~0.1 ms steps, which would corrupt the sub-millisecond dwell times that
+        # drive the kinetic analysis. _id_time (the idealization time base) is
+        # kept full precision for the same reason.
         self.time = time / TIME_UNIT_FACTORS[input_time_unit]
-        self.trace = trace / CURRENT_UNIT_FACTORS[input_trace_unit]
+        self.trace = (trace / CURRENT_UNIT_FACTORS[input_trace_unit]).astype(np.float32)
         self._id_time = time / TIME_UNIT_FACTORS[input_time_unit]
 
         if piezo is not None:
-            self.piezo = piezo / VOLTAGE_UNIT_FACTORS[input_piezo_unit]
+            self.piezo = (piezo / VOLTAGE_UNIT_FACTORS[input_piezo_unit]).astype(
+                np.float32
+            )
         else:
             self.piezo = None
         if command is not None:
-            self.command = command / VOLTAGE_UNIT_FACTORS[input_command_unit]
+            self.command = (command / VOLTAGE_UNIT_FACTORS[input_command_unit]).astype(
+                np.float32
+            )
         else:
             self.command = None
 

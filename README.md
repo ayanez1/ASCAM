@@ -48,6 +48,13 @@ Notes:
 - The `Piezo`/`Intervals` selection row is disabled for this method, because the baseline is estimated from the whole trace.
 - **Open-channel amplitudes are preserved** relative to baseline: the correction shifts the open and closed levels together, so the amplitude (open − closed) is unchanged — including across a corrected jump.
 
+### 4. Smoother plotting of large/continuous recordings
+
+Long continuous recordings (tens of millions of samples) used to make the trace view sluggish. Two changes keep it responsive:
+
+- **Adaptive trace decimation** — the trace, command, and piezo plots now draw only as many points as the screen can show, recomputed as you zoom (pyqtgraph peak/min-max downsampling with clip-to-view). Brief openings are preserved because each on-screen pixel column keeps both its minimum and maximum sample, and zooming in restores full detail. The raw data is untouched, so idealization and all analyses still use every sample.
+- **float32 channel storage** — current, command, and piezo traces are held as 32-bit floats, roughly halving memory use (the time base stays 64-bit to preserve sub-millisecond dwell-time resolution).
+
 ### Setup notes (Apple Silicon / macOS)
 
 This fork was made to build and run on Apple Silicon in a Python 3.10 conda env named `ASCAM`:

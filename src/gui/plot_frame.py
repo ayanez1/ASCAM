@@ -75,6 +75,15 @@ class PlotFrame(QWidget):
         self.trace_plot = pg.PlotWidget(viewBox=self.trace_viewbox, name=f"trace")
         self.trace_plot.setBackground("w")
         self.trace_plot.setLabel("left", "Current", units="A")
+        # Adaptive decimation: a long continuous recording can hold tens of
+        # millions of samples, far more than the screen has pixels. "peak" mode
+        # draws the min and max of each on-screen pixel column (so a brief
+        # opening still paints its column and is not skipped over), and
+        # clipToView only renders the portion currently in view. The underlying
+        # data is untouched; this only changes how many points get drawn, so
+        # idealization etc. still use every real sample.
+        self.trace_plot.setDownsampling(auto=True, mode="peak")
+        self.trace_plot.setClipToView(True)
         ind = int(self.show_command)
         self.layout.addWidget(self.trace_plot, ind, 0)
         self.layout.setRowStretch(ind, 2)
@@ -88,6 +97,8 @@ class PlotFrame(QWidget):
             self.piezo_plot.setLabel("left", "Piezo", units="V")
             self.piezo_plot.setBackground("w")
             self.piezo_plot.setLabel("bottom", "time", units="s")
+            self.piezo_plot.setDownsampling(auto=True, mode="peak")
+            self.piezo_plot.setClipToView(True)
             self.piezo_plot.setXLink(self.trace_plot)
             self.layout.addWidget(self.piezo_plot, ind, 0)
             self.layout.setRowStretch(ind, 1)
@@ -103,6 +114,8 @@ class PlotFrame(QWidget):
             )
             self.command_plot.setBackground("w")
             self.command_plot.setLabel("left", "Command", units="V")
+            self.command_plot.setDownsampling(auto=True, mode="peak")
+            self.command_plot.setClipToView(True)
             self.command_plot.setXLink(self.trace_plot)
             self.layout.addWidget(self.command_plot, 0, 0)
             self.layout.setRowStretch(0, 1)
