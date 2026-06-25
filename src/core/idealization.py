@@ -18,6 +18,9 @@ class IdealizationCache:
         thresholds=None,
         resolution=None,
         interpolation_factor=None,
+        level_contribution=0.1,
+        track_mode="off",
+        region=None,
     ):
         self.data = data
 
@@ -25,6 +28,9 @@ class IdealizationCache:
         self.thresholds = thresholds
         self.resolution = resolution
         self.interpolation_factor = interpolation_factor
+        self.level_contribution = level_contribution
+        self.track_mode = track_mode
+        self.region = region
 
     @property
     def ind_idealized(self):
@@ -92,6 +98,9 @@ class IdealizationCache:
                 self.thresholds,
                 self.resolution,
                 self.interpolation_factor,
+                self.level_contribution,
+                self.track_mode,
+                self.region,
             )
 
         else:

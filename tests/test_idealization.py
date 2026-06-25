@@ -126,3 +126,85 @@ def test_resolution_single_event_left_untouched():
     time = np.arange(len(trace), dtype=float)
     out = Idealizer.apply_resolution(trace.copy(), time, resolution=5)
     assert np.array_equal(out, np.array([2, 2], dtype=float))
+
+
+# --- ClampFit-style level tracking + detection region ------------------------
+
+# A drifting closed level interleaved with clean -2 openings. The closed level
+# drifts 0 -> -0.4 -> -0.8 -> -1.2; the last closed segment (samples 60:70) has
+# drifted past the static half-amplitude threshold (-1) and would be mistaken
+# for an opening without level tracking.
+_DRIFT_SEGMENTS = [0.0, -2.0, -0.4, -2.0, -0.8, -2.0, -1.2, -2.0]
+_DRIFT_AMPS = np.array([0.0, -2.0])
+
+
+def _drift_trace():
+    signal = np.repeat(_DRIFT_SEGMENTS, 10).astype(float)
+    time = np.arange(signal.size, dtype=float)
+    return signal, time
+
+
+def test_idealize_episode_backward_compatible():
+    """With tracking off and no region, the pipeline matches plain
+    threshold crossing."""
+    signal, time = _drift_trace()
+    out, out_time = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
+    expected = Idealizer.threshold_crossing(
+        signal, _DRIFT_AMPS, np.array([-1.0])
+    )
+    assert np.array_equal(out, expected)
+    assert np.array_equal(out_time, time)
+
+
+def test_static_detection_mislabels_drifted_closed_level():
+    """Sanity: without tracking the drifted closed segment is called open."""
+    signal, time = _drift_trace()
+    out, _ = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
+    assert np.all(out[60:70] == -2.0)  # wrongly detected as an opening
+
+
+def test_baseline_tracking_corrects_drift():
+    """Baseline tracking with enough contribution recovers the drifted closed
+    segment as closed, while genuine openings stay open."""
+    signal, time = _drift_trace()
+    out, _ = Idealizer.idealize_episode(
+        signal, time, _DRIFT_AMPS, track_mode="baseline", level_contribution=0.5
+    )
+    assert np.all(out[60:70] == 0.0)   # corrected to closed
+    assert np.all(out[10:20] == -2.0)  # real opening untouched
+    assert np.all(out[0:10] == 0.0)
+
+
+def test_low_level_contribution_lags_behind_drift():
+    """A small contribution updates the baseline too slowly to keep up, so the
+    drifted segment is still mislabeled (demonstrates the knob matters)."""
+    signal, time = _drift_trace()
+    out, _ = Idealizer.idealize_episode(
+        signal, time, _DRIFT_AMPS, track_mode="baseline", level_contribution=0.1
+    )
+    assert np.all(out[60:70] == -2.0)
+
+
+def test_track_all_mode_smoke():
+    """'all' mode runs and still classifies clear closed/open stretches."""
+    signal, time = _drift_trace()
+    out, _ = Idealizer.idealize_episode(
+        signal, time, _DRIFT_AMPS, track_mode="all", level_contribution=0.5
+    )
+    assert out.shape == signal.shape
+    assert np.all(out[0:10] == 0.0)    # clearly closed
+    assert np.all(out[10:20] == -2.0)  # clearly open
+
+
+def test_idealize_region_restricts_to_span():
+    """A detection region slices the idealization to the cursor span."""
+    signal = np.zeros(100, dtype=float)
+    signal[40:60] = -2.0
+    time = np.arange(100, dtype=float)
+    out, out_time = Idealizer.idealize_episode(
+        signal, time, _DRIFT_AMPS, region=(20, 50)
+    )
+    assert out.size == 30
+    assert out_time[0] == 20 and out_time[-1] == 49
+    assert np.all(out[:20] == 0.0)     # original samples 20:40, closed
+    assert np.all(out[20:] == -2.0)    # original samples 40:50, open

@@ -36,8 +36,27 @@ class Idealizer:
         thresholds = None,
         resolution = None,
         interpolation_factor = 1,
+        level_contribution = 0.1,
+        track_mode = "off",
+        region = None,
     ):
-        """Get idealization for single episode."""
+        """Get idealization for single episode.
+
+        Optional ClampFit-style additions (both default to the original
+        behavior):
+            level_contribution, track_mode - per-event level tracking, see
+                `track_levels`. track_mode is "off", "baseline" or "all".
+            region - a (t0, t1) tuple (in the same units as `time`). When given,
+                only the samples inside the span are idealized, so the returned
+                idealization/time cover the region only.
+        """
+
+        # restrict to the cursor-selected detection region, if any
+        if region is not None:
+            lo, hi = np.searchsorted(time, sorted(region))
+            if hi - lo >= 2:  # need at least two samples to idealize
+                signal = signal[lo:hi]
+                time = time[lo:hi]
 
         if thresholds is None or thresholds.size != amplitudes.size - 1:
             thresholds = (amplitudes[1:] + amplitudes[:-1]) / 2
@@ -47,9 +66,104 @@ class Idealizer:
 
         idealization = cls.threshold_crossing(signal, amplitudes, thresholds)
 
+        if track_mode and track_mode != "off":
+            idealization = cls.track_levels(
+                signal, idealization, amplitudes, level_contribution, track_mode
+            )
+
         if resolution is not None:
             idealization = cls.apply_resolution(idealization, time, resolution)
         return idealization, time
+
+    @staticmethod
+    def track_levels(
+        signal,
+        idealization,
+        amplitudes,
+        level_contribution=0.1,
+        track_mode="baseline",
+        n_iter=3,
+    ):
+        """ClampFit-style per-event level tracking.
+
+        Detection stays half-amplitude, but the level estimates (and therefore
+        the half-amplitude thresholds between them) are allowed to follow slow
+        drift instead of being fixed. This lets a closed level that drifts toward
+        the open level still be detected correctly, rather than crossing a fixed
+        threshold and being mistaken for openings.
+
+        The method alternates two cheap, vectorized steps until the idealization
+        stops changing (a few iterations):
+
+        1. Walk the current segments (runs of constant amplitude) left to right.
+           For each segment, record the half-amplitude thresholds currently in
+           force, classify it by nearest running estimate, and update that
+           estimate by a per-event exponentially weighted step:
+
+               estimate[level] = (1 - c) * estimate[level] + c * (segment mean)
+
+        2. Re-detect the whole trace using those per-sample (drifting)
+           thresholds.
+
+        Updates are per event (one per dwell), matching the ClampFit "level
+        contribution" knob. The returned idealization uses the *nominal* user
+        amplitudes (not the drifting estimates), so downstream event grouping,
+        histograms and amplitude lines keep working unchanged.
+
+        Args:
+            signal - the current trace the idealization was computed from
+            idealization - the initial threshold-crossing idealization
+            amplitudes - the user level amplitudes; sorted descending the most
+                positive (index 0) is treated as the closed/baseline level
+            level_contribution - c above, the fraction each event contributes to
+                its level's running average (typically 0.1-0.2)
+            track_mode - "baseline" updates only the closed level; "all" updates
+                whichever level each event is assigned to
+            n_iter - maximum detect/track iterations (converges in a few)
+        Returns:
+            the re-detected idealization array (same shape as the input)
+        """
+        amplitudes = np.sort(amplitudes)[::-1]  # descending; [0] = closed level
+        n_levels = amplitudes.size
+        if n_levels < 2:
+            # only one level: nothing to threshold or track
+            return idealization
+
+        ideal = idealization
+        for _ in range(n_iter):
+            # segment boundaries: start index of each run, plus one-past-the-end
+            change_inds = np.where(ideal[1:] != ideal[:-1])[0] + 1
+            starts = np.concatenate(([0], change_inds))
+            ends = np.concatenate((change_inds, [ideal.size]))  # exclusive
+            seg_lengths = ends - starts
+
+            # per-segment means of the signal in one vectorized pass
+            cumsum = np.concatenate(([0.0], np.cumsum(signal, dtype=float)))
+            seg_means = (cumsum[ends] - cumsum[starts]) / seg_lengths
+
+            # causal per-event pass: evolve the level estimates and record the
+            # thresholds in force during each segment (loop is O(events))
+            est = amplitudes.astype(float).copy()
+            seg_thresholds = np.empty((starts.size, n_levels - 1))
+            for i, mean in enumerate(seg_means):
+                seg_thresholds[i] = (est[1:] + est[:-1]) / 2  # half-amplitude
+                level = int(np.argmin(np.abs(est - mean)))
+                if track_mode == "all" or level == 0:
+                    est[level] = (
+                        1 - level_contribution
+                    ) * est[level] + level_contribution * mean
+
+            # re-detect with the (drifting) per-sample thresholds, vectorized
+            thr_per_sample = np.repeat(seg_thresholds, seg_lengths, axis=0)
+            new_ideal = np.full(signal.size, amplitudes[0], dtype=float)
+            for k in range(n_levels - 1):
+                new_ideal[signal < thr_per_sample[:, k]] = amplitudes[k + 1]
+
+            if np.array_equal(new_ideal, ideal):
+                ideal = new_ideal
+                break
+            ideal = new_ideal
+        return ideal
 
     @staticmethod
     def threshold_crossing(

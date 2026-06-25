@@ -12,6 +12,7 @@ from PySide2.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QCheckBox,
+    QComboBox,
     QLineEdit,
     QToolButton,
     QTabBar,
@@ -273,6 +274,37 @@ class IdealizationTab(EntryWidget):
         self.intrp_entry = QLineEdit(self)
         self.add_row(self.intrp_entry)
 
+        # ClampFit-style level tracking: follow the closed (and optionally open)
+        # current levels as they drift, so detection stays correct without
+        # subtracting a baseline from the trace.
+        track_label = QLabel("Level tracking")
+        self.track_mode_box = QComboBox()
+        self.track_mode_box.addItems(["Off", "Baseline", "Baseline + open levels"])
+        self.track_mode_box.setToolTip(
+            "Track the running current level(s) as they drift.\n"
+            "Baseline: track only the closed level.\n"
+            "Baseline + open levels: also track each open level."
+        )
+        self.add_row(track_label, self.track_mode_box)
+
+        contrib_label = QLabel("Level contribution %")
+        self.contribution_entry = QLineEdit("10")
+        self.contribution_entry.setToolTip(
+            "Per-event update weight for level tracking. When an event ends its\n"
+            "measured amplitude updates that level's running average:\n"
+            "    level = (1 - c) * level + c * event_mean.\n"
+            "Typically 10-20%."
+        )
+        self.add_row(contrib_label, self.contribution_entry)
+
+        # restrict idealization to a draggable region of the trace
+        self.use_region = QCheckBox("Limit detection to region")
+        self.use_region.setToolTip(
+            "Idealize only the span between the draggable cursors on the trace."
+        )
+        self.use_region.stateChanged.connect(self.toggle_region)
+        self.add_row(self.use_region)
+
     def toggle_drag_params(self, checked):
         self.parent.parent.main.plot_frame.tc_tracking = checked
 
@@ -287,6 +319,10 @@ class IdealizationTab(EntryWidget):
             self.res_entry.setEnabled(False)
         else:
             self.res_entry.setEnabled(True)
+
+    def toggle_region(self, state):
+        """Show or hide the draggable detection-region cursors on the trace."""
+        self.parent.parent.main.plot_frame.show_detection_region(bool(state))
 
     def toggle_auto_theta(self, state):
         # apparently state==2 if the box is checked and 0
@@ -330,13 +366,32 @@ class IdealizationTab(EntryWidget):
         else:
             intrp_factor = 1
 
-        if self.check_params_changed(amps, thresholds, resolution, intrp_factor):
+        # ClampFit-style level tracking: combo index 0/1/2 -> off/baseline/all
+        track_mode = ["off", "baseline", "all"][self.track_mode_box.currentIndex()]
+        try:
+            level_contribution = float(self.contribution_entry.text()) / 100.0
+        except ValueError:
+            level_contribution = 0.1
+
+        # detection region (in seconds, matching the plotted time axis)
+        region = None
+        if self.use_region.isChecked():
+            detection_region = self.parent.parent.main.plot_frame.detection_region
+            if detection_region is not None:
+                region = tuple(detection_region.getRegion())
+
+        if self.check_params_changed(
+            amps, thresholds, resolution, intrp_factor,
+            level_contribution, track_mode, region,
+        ):
             debug_logger.debug(
                 f"creating new idealization cache for\n"
                 f"amp = {amps} \n"
                 f"thresholds = {thresholds}\n"
                 f"resolution = {res_string}\n"
-                f"interpolation = {intrp_string}"
+                f"interpolation = {intrp_string}\n"
+                f"track_mode = {track_mode}, contribution = {level_contribution}\n"
+                f"region = {region}"
             )
             try:
                 self.idealization_cache.clear_idealization()
@@ -350,11 +405,14 @@ class IdealizationTab(EntryWidget):
                 else:
                     raise AttributeError(e)
             self.idealization_cache = IdealizationCache(
-                self.parent.parent.main.data, amps, thresholds, resolution, intrp_factor
+                self.parent.parent.main.data, amps, thresholds, resolution,
+                intrp_factor, level_contribution, track_mode, region,
             )
         return amps, thresholds, resolution, intrp_factor
 
-    def check_params_changed(self, amp, theta, res, intrp):
+    def check_params_changed(
+        self, amp, theta, res, intrp, contribution, track_mode, region
+    ):
         changed = True
         try:
             if set(amp) != set(self.idealization_cache.amplitudes):
@@ -365,6 +423,12 @@ class IdealizationTab(EntryWidget):
                 debug_logger.debug("resolution has changed")
             elif intrp != self.idealization_cache.interpolation_factor:
                 debug_logger.debug("interpolation factor has changed")
+            elif track_mode != self.idealization_cache.track_mode:
+                debug_logger.debug("level tracking mode has changed")
+            elif contribution != self.idealization_cache.level_contribution:
+                debug_logger.debug("level contribution has changed")
+            elif region != self.idealization_cache.region:
+                debug_logger.debug("detection region has changed")
             else:
                 changed = False
         except AttributeError:

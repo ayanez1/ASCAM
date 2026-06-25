@@ -89,7 +89,14 @@ class Episode:
         return self.trace[np.argmin(np.abs(self.time - self.first_activation))]
 
     def idealize(
-        self, amplitudes, thresholds=None, resolution=None, interpolation_factor=1
+        self,
+        amplitudes,
+        thresholds=None,
+        resolution=None,
+        interpolation_factor=1,
+        level_contribution=0.1,
+        track_mode="off",
+        region=None,
     ):
         self.idealization, self.id_time = Idealizer.idealize_episode(
             self.trace,
@@ -98,6 +105,9 @@ class Episode:
             thresholds,
             resolution,
             interpolation_factor,
+            level_contribution,
+            track_mode,
+            region,
         )
 
     def gauss_filter_episode(self, filter_frequency=1e3, sampling_rate=4e4):

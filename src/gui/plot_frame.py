@@ -50,6 +50,10 @@ class PlotFrame(QWidget):
         self.theta_lines = []
         self.theta_hist_lines = []
 
+        # draggable detection-region cursors (a pyqtgraph LinearRegionItem);
+        # None when the "Limit detection to region" option is off
+        self.detection_region = None
+
         self.main.ep_frame.ep_list.currentItemChanged.connect(
             self.update_plots, type=QtCore.Qt.QueuedConnection
         )
@@ -224,6 +228,9 @@ class PlotFrame(QWidget):
                 self.main.data.episode().time, self.main.data.episode().piezo, pen=pen
             )
         self.set_viewbox_limits()
+        # clear_plots() wipes everything off trace_plot, so re-add the detection
+        # region cursors (the Python object and its position persist)
+        self.redraw_detection_region()
 
     def set_viewbox_limits(self):
         time_max = np.max(self.main.data.episode().time)
@@ -260,6 +267,44 @@ class PlotFrame(QWidget):
         self.hist_viewbox.setLimits(
             xMin=-0.05, xMax=1.05, yMin=trace_min, yMax=trace_max
         )
+
+    def show_detection_region(self, on):
+        """Add or remove the draggable detection-region cursors on the trace."""
+        if on:
+            if self.detection_region is None:
+                # default span: the middle half of the current view
+                (x0, x1), _ = self.trace_viewbox.viewRange()
+                span = x1 - x0
+                region = pg.LinearRegionItem(
+                    values=(x0 + 0.25 * span, x0 + 0.75 * span),
+                    brush=(0, 100, 255, 40),
+                )
+                region.setZValue(-10)
+                region.sigRegionChangeFinished.connect(self.on_region_changed)
+                self.detection_region = region
+            self.trace_plot.addItem(self.detection_region)
+        elif self.detection_region is not None:
+            self.trace_plot.removeItem(self.detection_region)
+            self.detection_region = None
+            # re-idealize without the region restriction
+            self.recalc_idealization()
+
+    def on_region_changed(self):
+        """Re-idealize once when a region drag finishes (not during the drag)."""
+        self.recalc_idealization()
+
+    def recalc_idealization(self):
+        """Trigger a re-idealization if the idealization panel is ready (i.e.
+        amplitudes have been entered), otherwise do nothing."""
+        if self.main.tc_frame is None:
+            return
+        if self.main.tc_frame.current_tab.amp_entry.toPlainText().strip():
+            self.main.tc_frame.calculate_click()
+
+    def redraw_detection_region(self):
+        """Re-add the region item after the trace plot has been cleared."""
+        if self.detection_region is not None:
+            self.trace_plot.addItem(self.detection_region)
 
     def plot_fa_threshold(self, threshold):
         debug_logger.debug(f"plotting first activation threshold at {threshold}")
