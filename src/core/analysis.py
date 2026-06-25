@@ -116,9 +116,16 @@ class Idealizer:
             if events[i, 1] < resolution:
                 i_start = int(np.where(time == events[i, 2])[0])
                 i_end = int(np.where(time == events[i, 3])[0]) + 1
-                # add the first but not the last event to the next,
-                # otherwise, flip a coin
-                if (np.random.binomial(1, 0.5) or i == 0) and i != end_ind - 1:
+                # Deterministic dead-time imposition (Colquhoun & Sigworth):
+                # a sub-resolution interval is concatenated with the PRECEDING
+                # resolvable interval. The first interval has no predecessor, so
+                # it is concatenated with the following one instead (the only
+                # deterministic choice at the start of the trace).
+                if i == 0:
+                    if end_ind == 1:
+                        # A single event spans the whole trace; nothing to merge.
+                        break
+                    # merge the (too-short) first event into the next one
                     i_end = int(np.where(time == events[i + 1, 3])[0]) + 1
                     idealization[i_start:i_end] = events[i + 1, 0]
                     # set amplitude
@@ -129,7 +136,7 @@ class Idealizer:
                     events[i, 3] = events[i + 1, 3]
                     # delete next event
                     events = np.delete(events, i + 1, axis=0)
-                else:  # add to the previous event
+                else:  # add to the preceding event
                     i_start = int(np.where(time == events[i - 1, 2])[0])
                     idealization[i_start:i_end] = events[i - 1, 0]
                     # add duration
