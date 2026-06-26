@@ -258,14 +258,18 @@ class Recording(dict):
         self.current_datakey = new_datakey
         debug_logger.debug("keys of the recording are now {}".format(self.keys()))
 
-    def baseline_correction_pelt(self, percentile=50, jump_sensitivity=1.0):
+    def baseline_correction_pelt(
+        self, percentile=50, jump_sensitivity=1.0, min_jump_size=None
+    ):
         """Flatten sudden baseline jumps across the current series (PELT only).
 
         Detects baseline jumps with PELT and subtracts a constant closed-level
         offset within each between-jump segment, removing the steps but not slow
         drift. Apply the running-percentile correction afterwards to remove drift.
         `percentile` should sit on the closed level (50/median for low open
-        probability)."""
+        probability). `min_jump_size` (in the trace's units, i.e. amps) sets an
+        absolute minimum step to count as a jump; if None the threshold is derived
+        automatically from the noise and scaled by `jump_sensitivity`."""
 
         if self.current_datakey == "raw_":
             new_datakey = "PELT_"
@@ -273,7 +277,8 @@ class Recording(dict):
             new_datakey = self.current_datakey + "PELT_"
         ana_logger.info(
             f"PELT baseline-jump correction on series '{self.current_datakey}'\n"
-            f"percentile {percentile}, jump sensitivity {jump_sensitivity}\n"
+            f"percentile {percentile}, jump sensitivity {jump_sensitivity}, "
+            f"min jump size {min_jump_size}\n"
             f"sampling rate of this recording is {self.sampling_rate}"
         )
         self[new_datakey] = copy.deepcopy(self.series)
@@ -281,6 +286,7 @@ class Recording(dict):
             jumps = episode.baseline_correct_pelt(
                 percentile=percentile,
                 jump_sensitivity=jump_sensitivity,
+                min_jump_size=min_jump_size,
                 sampling_rate=self.sampling_rate,
             )
             ana_logger.info(

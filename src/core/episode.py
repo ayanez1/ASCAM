@@ -216,19 +216,26 @@ class Episode:
         return boundaries if boundaries is not None else np.array([], dtype=int)
 
     def baseline_correct_pelt(
-        self, percentile=50, jump_sensitivity=1.0, sampling_rate=4e4
+        self,
+        percentile=50,
+        jump_sensitivity=1.0,
+        min_jump_size=None,
+        sampling_rate=4e4,
     ):
         """Flatten sudden baseline jumps in the episode (PELT only).
 
         Detects baseline jumps with PELT and subtracts a constant closed-level
         offset within each between-jump segment, removing the steps but not slow
-        drift. Returns the detected jump indices (or an empty array)."""
+        drift. `min_jump_size` (trace units) sets an absolute minimum step to
+        count as a jump (None = automatic, scaled by `jump_sensitivity`).
+        Returns the detected jump indices (or an empty array)."""
 
         self.trace, boundaries = baseline_correction_jumps(
             self.trace,
             sampling_rate=sampling_rate,
             percentile=percentile,
             sensitivity=jump_sensitivity,
+            min_jump_size=min_jump_size,
         )
         return boundaries
 

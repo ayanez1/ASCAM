@@ -15,7 +15,7 @@ from PySide2.QtWidgets import (
 
 from ..utils import clear_qt_layout, string_to_list, get_dict_key_index
 from ..utils.widgets import VerticalContainerWidget
-from ..constants import TIME_UNIT_FACTORS
+from ..constants import TIME_UNIT_FACTORS, CURRENT_UNIT_FACTORS
 from ..core.filtering import filter_risetime, filter_deadtime
 
 
@@ -266,10 +266,19 @@ class BaselineWidget(VerticalContainerWidget):
 
             self.sensitivity_entry = QLineEdit("1.0")
             self.sensitivity_entry.setToolTip(
-                "Scales the jump-detection penalty; higher values detect "
-                "more (smaller) jumps."
+                "Scales the automatic (noise-relative) jump threshold; higher "
+                "values detect more (smaller) jumps.\nIgnored when a Min jump "
+                "size is given below."
             )
             self.selection_layout.addRow("Jump sensitivity", self.sensitivity_entry)
+
+            self.min_jump_entry = QLineEdit("")
+            self.min_jump_entry.setToolTip(
+                "Absolute minimum step (in pA) to count as a baseline jump.\n"
+                "Leave blank to use the automatic threshold (Jump sensitivity).\n"
+                "Set e.g. 20 to only flatten large jumps and leave openings alone."
+            )
+            self.selection_layout.addRow("Min jump size [pA]", self.min_jump_entry)
         # "Offset" needs no extra widgets
         self.layout.insertLayout(1, self.selection_layout)
 
@@ -354,9 +363,17 @@ class BaselineWidget(VerticalContainerWidget):
                 percentile=float(self.percentile_entry.text()),
             )
         elif method == "PELT Jump Correction":
+            # blank min-jump field -> automatic threshold; a value is an absolute
+            # threshold entered in pA, converted to the trace's base unit (A)
+            min_jump_text = self.min_jump_entry.text().strip()
+            if min_jump_text:
+                min_jump_size = float(min_jump_text) / CURRENT_UNIT_FACTORS["pA"]
+            else:
+                min_jump_size = None
             self.main.data.baseline_correction_pelt(
                 percentile=float(self.percentile_entry.text()),
                 jump_sensitivity=float(self.sensitivity_entry.text()),
+                min_jump_size=min_jump_size,
             )
         else:
             if method != "Offset":

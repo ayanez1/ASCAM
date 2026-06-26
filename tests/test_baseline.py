@@ -48,3 +48,26 @@ def test_baseline_correction_jumps_detects_and_flattens_step():
     # both halves now sit near zero
     assert abs(np.median(corrected[: n // 2])) < 0.1
     assert abs(np.median(corrected[n // 2:])) < 0.1
+
+
+def test_min_jump_size_ignores_small_steps():
+    """An absolute min_jump_size lets PELT skip steps smaller than it and catch
+    larger ones. Requires the optional `ruptures` package."""
+    pytest.importorskip("ruptures")
+    rng = np.random.default_rng(1)
+    sampling_rate = 20_000.0
+    n = 40_000
+    signal = rng.normal(0.0, 0.2, n)
+    signal[n // 2:] += 5.0  # a 5-unit step
+
+    # threshold above the step size -> nothing detected
+    _, none_found = baseline_correction_jumps(
+        signal, sampling_rate, min_jump_size=20.0
+    )
+    assert len(none_found) == 0
+
+    # threshold below the step size -> the step is found
+    _, found = baseline_correction_jumps(
+        signal, sampling_rate, min_jump_size=2.0
+    )
+    assert len(found) == 1

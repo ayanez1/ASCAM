@@ -545,7 +545,7 @@ def _piecewise_offset_baseline(signal, boundaries, percentile=50):
 
 
 def baseline_correction_jumps(
-    signal, sampling_rate, percentile=50, sensitivity=1.0
+    signal, sampling_rate, percentile=50, sensitivity=1.0, min_jump_size=None
 ):
     """Detect sudden baseline jumps (PELT) and flatten them.
 
@@ -559,13 +559,20 @@ def baseline_correction_jumps(
         signal [1D array] - the current trace
         sampling_rate [float] - sampling rate in Hz
         percentile [float] - percentile (0-100) tracking the closed level
-        sensitivity [float] - scales the PELT jump-magnitude threshold
+        sensitivity [float] - scales the automatic jump-magnitude threshold
+        min_jump_size [float or None] - absolute minimum step (in signal units)
+            to count as a jump; if None the threshold is derived from the noise
+            and scaled by `sensitivity`. Set this to ignore openings and only
+            flatten large jumps.
     Returns:
         (corrected_signal, jump_indices) - the offset-corrected signal and the
             detected jump sample indices (empty if none)"""
 
     boundaries = detect_baseline_jumps(
-        signal, sampling_rate, sensitivity=sensitivity
+        signal,
+        sampling_rate,
+        sensitivity=sensitivity,
+        min_jump_size=min_jump_size,
     )
     corrected = _piecewise_offset_baseline(signal, boundaries, percentile)
     return corrected, boundaries
