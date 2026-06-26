@@ -77,6 +77,7 @@ class Episode:
         self.manual_first_activation = False
         self.idealization = None
         self.id_time = None
+        self.id_signal = None
         # metadata about the episode
         self.n_episode = int(n_episode)
 
@@ -98,7 +99,7 @@ class Episode:
         track_mode="off",
         region=None,
     ):
-        self.idealization, self.id_time = Idealizer.idealize_episode(
+        self.idealization, self.id_time, self.id_signal = Idealizer.idealize_episode(
             self.trace,
             self.time,
             amplitudes,

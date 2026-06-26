@@ -148,7 +148,7 @@ def test_idealize_episode_backward_compatible():
     """With tracking off and no region, the pipeline matches plain
     threshold crossing."""
     signal, time = _drift_trace()
-    out, out_time = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
+    out, out_time, _ = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
     expected = Idealizer.threshold_crossing(
         signal, _DRIFT_AMPS, np.array([-1.0])
     )
@@ -159,7 +159,7 @@ def test_idealize_episode_backward_compatible():
 def test_static_detection_mislabels_drifted_closed_level():
     """Sanity: without tracking the drifted closed segment is called open."""
     signal, time = _drift_trace()
-    out, _ = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
+    out, _, _ = Idealizer.idealize_episode(signal, time, _DRIFT_AMPS)
     assert np.all(out[60:70] == -2.0)  # wrongly detected as an opening
 
 
@@ -167,7 +167,7 @@ def test_baseline_tracking_corrects_drift():
     """Baseline tracking with enough contribution recovers the drifted closed
     segment as closed, while genuine openings stay open."""
     signal, time = _drift_trace()
-    out, _ = Idealizer.idealize_episode(
+    out, _, _ = Idealizer.idealize_episode(
         signal, time, _DRIFT_AMPS, track_mode="baseline", level_contribution=0.5
     )
     assert np.all(out[60:70] == 0.0)   # corrected to closed
@@ -179,7 +179,7 @@ def test_low_level_contribution_lags_behind_drift():
     """A small contribution updates the baseline too slowly to keep up, so the
     drifted segment is still mislabeled (demonstrates the knob matters)."""
     signal, time = _drift_trace()
-    out, _ = Idealizer.idealize_episode(
+    out, _, _ = Idealizer.idealize_episode(
         signal, time, _DRIFT_AMPS, track_mode="baseline", level_contribution=0.1
     )
     assert np.all(out[60:70] == -2.0)
@@ -188,7 +188,7 @@ def test_low_level_contribution_lags_behind_drift():
 def test_track_all_mode_smoke():
     """'all' mode runs and still classifies clear closed/open stretches."""
     signal, time = _drift_trace()
-    out, _ = Idealizer.idealize_episode(
+    out, _, _ = Idealizer.idealize_episode(
         signal, time, _DRIFT_AMPS, track_mode="all", level_contribution=0.5
     )
     assert out.shape == signal.shape
@@ -201,10 +201,45 @@ def test_idealize_region_restricts_to_span():
     signal = np.zeros(100, dtype=float)
     signal[40:60] = -2.0
     time = np.arange(100, dtype=float)
-    out, out_time = Idealizer.idealize_episode(
+    out, out_time, _ = Idealizer.idealize_episode(
         signal, time, _DRIFT_AMPS, region=(20, 50)
     )
     assert out.size == 30
     assert out_time[0] == 20 and out_time[-1] == 49
     assert np.all(out[:20] == 0.0)     # original samples 20:40, closed
     assert np.all(out[20:] == -2.0)    # original samples 40:50, open
+
+
+# --- Measured (mean) amplitude per event -------------------------------------
+
+
+def test_extract_events_without_signal_unchanged():
+    """Without a signal, extract_events still returns the 4-column table."""
+    idealization = np.array([1, 1, 2, 2], dtype=float)
+    time = np.arange(idealization.size, dtype=float)
+    out = Idealizer.extract_events(idealization, time)
+    assert out.shape == (2, 4)
+
+
+def test_extract_events_appends_measured_mean_amplitude():
+    """With a signal, a fifth column holds the mean current of each event."""
+    idealization = np.array([1, 1, 2, 2], dtype=float)
+    signal = np.array([1.0, 1.2, 2.0, 2.4], dtype=float)
+    time = np.arange(idealization.size, dtype=float)
+    out = Idealizer.extract_events(idealization, time, signal)
+    assert out.shape == (2, 5)
+    # first four columns match the no-signal call
+    base = Idealizer.extract_events(idealization, time)
+    assert np.array_equal(out[:, :4], base)
+    # measured column = per-event means
+    assert np.allclose(out[:, 4], [1.1, 2.2])
+
+
+def test_measured_amplitude_three_events():
+    """Means are computed over the correct (inclusive) sample spans."""
+    idealization = np.array([0, 0, 0, 5, 5, 0], dtype=float)
+    signal = np.array([0.0, 1.0, 2.0, 4.0, 6.0, -3.0], dtype=float)
+    time = np.arange(idealization.size, dtype=float)
+    out = Idealizer.extract_events(idealization, time, signal)
+    # events: [0:3] mean (0+1+2)/3=1.0 ; [3:5] mean (4+6)/2=5.0 ; [5] mean -3.0
+    assert np.allclose(out[:, 4], [1.0, 5.0, -3.0])

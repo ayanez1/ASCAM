@@ -73,7 +73,9 @@ class Idealizer:
 
         if resolution is not None:
             idealization = cls.apply_resolution(idealization, time, resolution)
-        return idealization, time
+        # also return the (possibly region-sliced / interpolated) signal so the
+        # event amplitudes can be measured against the exact samples used
+        return idealization, time, signal
 
     @staticmethod
     def track_levels(
@@ -271,17 +273,20 @@ class Idealizer:
 
     @staticmethod
     def extract_events(
-        idealization, time
+        idealization, time, signal=None
     ):
         """Summarize an idealized trace as a list of events.
 
         Args:
             idealization [1D numpy array] - an idealized current trace
             time [1D numpy array] - the corresponding time array
+            signal [1D numpy array, optional] - the current trace the
+                idealization was measured from. When given, the mean current of
+                this signal over each event is appended as a fifth column.
         Return:
-            event_list [4D numpy array] - an array containing the amplitude of
-                the event, its duration, the time it starts and the time it
-                end in its columns"""
+            event_list [2D numpy array] - one row per event with columns
+                [amplitude, duration, t_start, t_end] (the idealized amplitude),
+                plus a fifth [measured_amplitude] column when `signal` is given."""
 
         events = np.where(idealization[1:] != idealization[:-1])[0]
         # events = events.astype(int)
@@ -316,7 +321,22 @@ class Idealizer:
         # sampling interval
         sampling_interval = time[1] - time[0]
         event_list[:, 1] = event_list[:, 3] - event_list[:, 2] + sampling_interval
-        return event_list
+
+        if signal is None:
+            return event_list
+
+        # append the mean current of `signal` over each event. The event sample
+        # spans are [start, end] inclusive: event 0 is [0, events[0]], event j is
+        # [events[j-1]+1, events[j]], and the last is [events[-1]+1, N-1].
+        if n_events == 1:
+            starts = np.array([0])
+            ends = np.array([idealization.size - 1])
+        else:
+            starts = np.concatenate(([0], events + 1))
+            ends = np.concatenate((events, [idealization.size - 1]))
+        cumsum = np.concatenate(([0.0], np.cumsum(signal, dtype=float)))
+        measured = (cumsum[ends + 1] - cumsum[starts]) / (ends + 1 - starts)
+        return np.column_stack((event_list, measured))
 
 
 def detect_first_activation(

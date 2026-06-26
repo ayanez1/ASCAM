@@ -84,6 +84,7 @@ class IdealizationCache:
             ]:
                 episode.idealization = None
                 episode.id_time = None
+                episode.id_signal = None
 
     def idealize_episode(self, n_episode=None):
         if n_episode is None:
@@ -115,20 +116,27 @@ class IdealizationCache:
     def get_events(self, time_unit="s", trace_unit="A"):
         if self.all_ep_inds != self.ind_idealized:
             self.idealize_series()
-        event_array = np.zeros((0, 5)).astype(object)
+        # columns: episode#, idealized amp, duration, t_start, t_stop, measured amp
+        event_array = np.zeros((0, 6)).astype(object)
         for episode in self.data.series:
-            # create a column containing the episode number
+            # extract_events appends the measured (mean) amplitude when given the
+            # signal the idealization was computed from
             ep_events = Idealizer.extract_events(
-                self.idealization(episode.n_episode), self.time()
+                self.idealization(episode.n_episode),
+                self.time(episode.n_episode),
+                episode.id_signal,
             )
+            # create a column containing the episode number and glue it on
             episode_number = episode.n_episode * np.ones(len(ep_events[:, 0]))
-            # glue that column to the event
             ep_events = np.concatenate(
                 (episode_number[:, np.newaxis], ep_events), axis=1
             )
             event_array = np.concatenate((event_array, ep_events), axis=0)
+        # idealized amplitude (col 1) and measured amplitude (col 5) are currents;
+        # duration/start/stop (cols 2-4) are times
         event_array[:, 1] *= CURRENT_UNIT_FACTORS[trace_unit]
-        event_array[:, 2:] *= TIME_UNIT_FACTORS[time_unit]
+        event_array[:, 5] *= CURRENT_UNIT_FACTORS[trace_unit]
+        event_array[:, 2:5] *= TIME_UNIT_FACTORS[time_unit]
         return event_array
 
     def dwell_time_hist(
@@ -182,6 +190,7 @@ class IdealizationCache:
             f"Duration [{time_unit}]",
             f"t_start [{time_unit}]",
             f"t_stop [{time_unit}]",
+            f"Measured amplitude [{trace_unit}]",
         ]
         params = (
             f"amplitudes = {self.amplitudes} [A];"
@@ -193,7 +202,8 @@ class IdealizationCache:
         export_array = pd.DataFrame(export_array, columns=header)
         # truncate floats for duration and timestamps to 1 micro second
         export_array = round_off_tables(
-            export_array, ["int", trace_unit, time_unit, time_unit, time_unit]
+            export_array,
+            ["int", trace_unit, time_unit, time_unit, time_unit, trace_unit],
         )
         with open(filepath, "w") as f:
             f.write(params)

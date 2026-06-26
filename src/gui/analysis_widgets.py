@@ -469,6 +469,7 @@ class IdealizationTab(EntryWidget):
                 f"Duration [{self.time_unit}]",
                 f"t_start [{self.time_unit}]",
                 f"t_stop [{self.time_unit}]",
+                f"Measured amplitude [{self.trace_unit}]",
             ],
             title=f"Amp={params[0]}; Thresh={params[1]}; Res={params[2]}; Intrp={params[3]}",
             trace_unit=self.trace_unit,
