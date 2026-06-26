@@ -258,6 +258,38 @@ class Recording(dict):
         self.current_datakey = new_datakey
         debug_logger.debug("keys of the recording are now {}".format(self.keys()))
 
+    def baseline_correction_pelt(self, percentile=50, jump_sensitivity=1.0):
+        """Flatten sudden baseline jumps across the current series (PELT only).
+
+        Detects baseline jumps with PELT and subtracts a constant closed-level
+        offset within each between-jump segment, removing the steps but not slow
+        drift. Apply the running-percentile correction afterwards to remove drift.
+        `percentile` should sit on the closed level (50/median for low open
+        probability)."""
+
+        if self.current_datakey == "raw_":
+            new_datakey = "PELT_"
+        else:
+            new_datakey = self.current_datakey + "PELT_"
+        ana_logger.info(
+            f"PELT baseline-jump correction on series '{self.current_datakey}'\n"
+            f"percentile {percentile}, jump sensitivity {jump_sensitivity}\n"
+            f"sampling rate of this recording is {self.sampling_rate}"
+        )
+        self[new_datakey] = copy.deepcopy(self.series)
+        for episode in self[new_datakey]:
+            jumps = episode.baseline_correct_pelt(
+                percentile=percentile,
+                jump_sensitivity=jump_sensitivity,
+                sampling_rate=self.sampling_rate,
+            )
+            ana_logger.info(
+                f"episode {episode.n_episode}: detected {len(jumps)} "
+                f"baseline jump(s)"
+            )
+        self.current_datakey = new_datakey
+        debug_logger.debug("keys of the recording are now {}".format(self.keys()))
+
     def gauss_filter_series(self, filter_freq):
         """Filter the current series using a gaussian filter"""
         ana_logger.info(

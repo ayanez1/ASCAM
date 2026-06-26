@@ -8,6 +8,7 @@ from .analysis import (
     baseline_correction,
     running_percentile_baseline,
     detect_baseline_jumps,
+    baseline_correction_jumps,
     detect_first_activation,
     Idealizer,
     detect_first_events,
@@ -213,6 +214,23 @@ class Episode:
             segment_boundaries=boundaries,
         )
         return boundaries if boundaries is not None else np.array([], dtype=int)
+
+    def baseline_correct_pelt(
+        self, percentile=50, jump_sensitivity=1.0, sampling_rate=4e4
+    ):
+        """Flatten sudden baseline jumps in the episode (PELT only).
+
+        Detects baseline jumps with PELT and subtracts a constant closed-level
+        offset within each between-jump segment, removing the steps but not slow
+        drift. Returns the detected jump indices (or an empty array)."""
+
+        self.trace, boundaries = baseline_correction_jumps(
+            self.trace,
+            sampling_rate=sampling_rate,
+            percentile=percentile,
+            sensitivity=jump_sensitivity,
+        )
+        return boundaries
 
     def check_standarddeviation_all(self, stdthreshold=5e-13):
         """Check the standard deviation of the episode against a reference

@@ -518,6 +518,59 @@ def running_percentile_baseline(
     return signal - baseline
 
 
+def _piecewise_offset_baseline(signal, boundaries, percentile=50):
+    """Subtract a single constant closed-level offset within each segment.
+
+    The signal is split at `boundaries` (sample indices) and a single percentile
+    of each segment is subtracted from it, so every between-jump segment is
+    shifted to a common baseline. Unlike `running_percentile_baseline` this
+    removes only the step offsets, not within-segment drift; amplitudes within a
+    segment are preserved (open and closed shift together).
+
+    Parameters:
+        signal [1D array] - the current trace
+        boundaries [sequence of int] - sample indices at which the baseline jumps
+        percentile [float] - percentile (0-100) tracking the closed level
+    Returns:
+        the signal with the per-segment offset subtracted"""
+
+    signal = np.asarray(signal, dtype=float)
+    n = signal.size
+    interior = sorted({int(b) for b in boundaries if 0 < b < n})
+    edges = [0] + interior + [n]
+    baseline = np.empty(n, dtype=float)
+    for start, end in zip(edges[:-1], edges[1:]):
+        baseline[start:end] = np.percentile(signal[start:end], percentile)
+    return signal - baseline
+
+
+def baseline_correction_jumps(
+    signal, sampling_rate, percentile=50, sensitivity=1.0
+):
+    """Detect sudden baseline jumps (PELT) and flatten them.
+
+    This is the standalone counterpart to `running_percentile_baseline`: it
+    corrects only the sudden step changes in the baseline (not slow drift) by
+    subtracting a constant closed-level offset within each between-jump segment.
+    Applying this and then the running-percentile correction handles steps and
+    drift in two independent passes.
+
+    Parameters:
+        signal [1D array] - the current trace
+        sampling_rate [float] - sampling rate in Hz
+        percentile [float] - percentile (0-100) tracking the closed level
+        sensitivity [float] - scales the PELT jump-magnitude threshold
+    Returns:
+        (corrected_signal, jump_indices) - the offset-corrected signal and the
+            detected jump sample indices (empty if none)"""
+
+    boundaries = detect_baseline_jumps(
+        signal, sampling_rate, sensitivity=sensitivity
+    )
+    corrected = _piecewise_offset_baseline(signal, boundaries, percentile)
+    return corrected, boundaries
+
+
 def detect_baseline_jumps(
     signal,
     sampling_rate,

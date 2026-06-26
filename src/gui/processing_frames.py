@@ -182,7 +182,12 @@ class BaselineFrame(QDialog):
 
 class BaselineWidget(VerticalContainerWidget):
     def __init__(self, main, dialog):
-        self.method_options = ["Polynomial", "Offset", "Running Percentile"]
+        self.method_options = [
+            "Polynomial",
+            "Offset",
+            "Running Percentile",
+            "PELT Jump Correction",
+        ]
         self.selection_options = ["Piezo", "Intervals"]
 
         super().__init__(main)
@@ -246,23 +251,34 @@ class BaselineWidget(VerticalContainerWidget):
                 "openings, down for outward (positive-going)."
             )
             self.selection_layout.addRow("Percentile", self.percentile_entry)
-
-            self.detect_jumps_check = QCheckBox("Detect baseline jumps (PELT)")
-            self.detect_jumps_check.setChecked(False)
-            self.selection_layout.addRow(self.detect_jumps_check)
+        elif method == "PELT Jump Correction":
+            debug_logger.debug("Creating PELT jump-correction input widgets")
+            # detect sudden baseline steps and flatten each segment to a common
+            # baseline (no within-segment drift tracking -- use Running
+            # Percentile afterwards for drift)
+            self.percentile_entry = QLineEdit("50")
+            self.percentile_entry.setToolTip(
+                "Percentile tracking the closed (baseline) level, subtracted "
+                "within each between-jump segment.\n50 (median) is unbiased "
+                "when the channel is open less than half the time."
+            )
+            self.selection_layout.addRow("Percentile", self.percentile_entry)
 
             self.sensitivity_entry = QLineEdit("1.0")
             self.sensitivity_entry.setToolTip(
                 "Scales the jump-detection penalty; higher values detect "
-                "fewer jumps."
+                "more (smaller) jumps."
             )
             self.selection_layout.addRow("Jump sensitivity", self.sensitivity_entry)
         # "Offset" needs no extra widgets
         self.layout.insertLayout(1, self.selection_layout)
 
         # the Piezo/Intervals selection only applies to the fitted corrections;
-        # the running percentile estimates the baseline from the whole trace
-        self.set_selection_enabled(method != "Running Percentile")
+        # the running-percentile and PELT methods estimate the baseline from the
+        # whole trace
+        self.set_selection_enabled(
+            method not in ("Running Percentile", "PELT Jump Correction")
+        )
 
     def set_selection_enabled(self, enabled):
         """Enable or disable the Piezo/Intervals selection row (it does not
@@ -336,7 +352,10 @@ class BaselineWidget(VerticalContainerWidget):
             self.main.data.baseline_correction_running_percentile(
                 window_duration=window_duration,
                 percentile=float(self.percentile_entry.text()),
-                detect_jumps=self.detect_jumps_check.isChecked(),
+            )
+        elif method == "PELT Jump Correction":
+            self.main.data.baseline_correction_pelt(
+                percentile=float(self.percentile_entry.text()),
                 jump_sensitivity=float(self.sensitivity_entry.text()),
             )
         else:
