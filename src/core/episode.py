@@ -6,9 +6,6 @@ from ..constants import CURRENT_UNIT_FACTORS, VOLTAGE_UNIT_FACTORS, TIME_UNIT_FA
 from .filtering import gaussian_filter, bessel_filter, ChungKennedyFilter
 from .analysis import (
     baseline_correction,
-    running_percentile_baseline,
-    detect_baseline_jumps,
-    baseline_correction_jumps,
     detect_first_activation,
     Idealizer,
     detect_first_events,
@@ -178,66 +175,6 @@ class Episode:
             active=active,
             deviation=deviation,
         )
-
-    def baseline_correct_running_percentile(
-        self,
-        window_duration,
-        percentile=50,
-        detect_jumps=False,
-        jump_sensitivity=1.0,
-        sampling_rate=4e4,
-    ):
-        """Apply a running-percentile baseline correction to the episode.
-
-        If `detect_jumps` is set, sudden baseline jumps are located with PELT
-        first and the percentile baseline is estimated independently within each
-        segment, so the correction snaps at jumps and tracks drift between them.
-        Returns the detected jump indices (or an empty array)."""
-
-        if detect_jumps:
-            # detection auto-derives its own closed-side percentile from the
-            # trace, independent of the baseline-correction percentile
-            boundaries = detect_baseline_jumps(
-                self.trace,
-                sampling_rate,
-                sensitivity=jump_sensitivity,
-            )
-        else:
-            boundaries = None
-
-        self.trace = running_percentile_baseline(
-            time=self.time,
-            signal=self.trace,
-            sampling_rate=sampling_rate,
-            window_duration=window_duration,
-            percentile=percentile,
-            segment_boundaries=boundaries,
-        )
-        return boundaries if boundaries is not None else np.array([], dtype=int)
-
-    def baseline_correct_pelt(
-        self,
-        percentile=50,
-        jump_sensitivity=1.0,
-        min_jump_size=None,
-        sampling_rate=4e4,
-    ):
-        """Flatten sudden baseline jumps in the episode (PELT only).
-
-        Detects baseline jumps with PELT and subtracts a constant closed-level
-        offset within each between-jump segment, removing the steps but not slow
-        drift. `min_jump_size` (trace units) sets an absolute minimum step to
-        count as a jump (None = automatic, scaled by `jump_sensitivity`).
-        Returns the detected jump indices (or an empty array)."""
-
-        self.trace, boundaries = baseline_correction_jumps(
-            self.trace,
-            sampling_rate=sampling_rate,
-            percentile=percentile,
-            sensitivity=jump_sensitivity,
-            min_jump_size=min_jump_size,
-        )
-        return boundaries
 
     def check_standarddeviation_all(self, stdthreshold=5e-13):
         """Check the standard deviation of the episode against a reference

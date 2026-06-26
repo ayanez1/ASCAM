@@ -15,7 +15,7 @@ from PySide2.QtWidgets import (
 
 from ..utils import clear_qt_layout, string_to_list, get_dict_key_index
 from ..utils.widgets import VerticalContainerWidget
-from ..constants import TIME_UNIT_FACTORS, CURRENT_UNIT_FACTORS
+from ..constants import TIME_UNIT_FACTORS
 from ..core.filtering import filter_risetime, filter_deadtime
 
 
@@ -182,12 +182,7 @@ class BaselineFrame(QDialog):
 
 class BaselineWidget(VerticalContainerWidget):
     def __init__(self, main, dialog):
-        self.method_options = [
-            "Polynomial",
-            "Offset",
-            "Running Percentile",
-            "PELT Jump Correction",
-        ]
+        self.method_options = ["Polynomial", "Offset"]
         self.selection_options = ["Piezo", "Intervals"]
 
         super().__init__(main)
@@ -229,69 +224,14 @@ class BaselineWidget(VerticalContainerWidget):
             debug_logger.debug("Creating polynomial input widgets")
             self.degree_entry = QLineEdit("1")
             self.selection_layout.addRow("Degree", self.degree_entry)
-        elif method == "Running Percentile":
-            debug_logger.debug("Creating running-percentile input widgets")
-            window_layout = QHBoxLayout()
-            self.window_entry = QLineEdit("0.5")
-            self.window_unit_entry = QComboBox()
-            self.window_unit_entry.addItems(list(TIME_UNIT_FACTORS.keys()))
-            self.window_unit_entry.setCurrentIndex(
-                get_dict_key_index(TIME_UNIT_FACTORS, "s")
-            )
-            window_layout.addWidget(self.window_entry)
-            window_layout.addWidget(self.window_unit_entry)
-            self.selection_layout.addRow("Window", window_layout)
-
-            self.percentile_entry = QLineEdit("50")
-            self.percentile_entry.setToolTip(
-                "Percentile tracking the closed (baseline) level.\n"
-                "50 (median) is unbiased when the channel is open less\n"
-                "than half the time. Shift toward the closed side only at\n"
-                "high open probability: up for inward (negative-going)\n"
-                "openings, down for outward (positive-going)."
-            )
-            self.selection_layout.addRow("Percentile", self.percentile_entry)
-        elif method == "PELT Jump Correction":
-            debug_logger.debug("Creating PELT jump-correction input widgets")
-            # detect sudden baseline steps and flatten each segment to a common
-            # baseline (no within-segment drift tracking -- use Running
-            # Percentile afterwards for drift)
-            self.percentile_entry = QLineEdit("50")
-            self.percentile_entry.setToolTip(
-                "Percentile tracking the closed (baseline) level, subtracted "
-                "within each between-jump segment.\n50 (median) is unbiased "
-                "when the channel is open less than half the time."
-            )
-            self.selection_layout.addRow("Percentile", self.percentile_entry)
-
-            self.sensitivity_entry = QLineEdit("1.0")
-            self.sensitivity_entry.setToolTip(
-                "Scales the automatic (noise-relative) jump threshold; higher "
-                "values detect more (smaller) jumps.\nIgnored when a Min jump "
-                "size is given below."
-            )
-            self.selection_layout.addRow("Jump sensitivity", self.sensitivity_entry)
-
-            self.min_jump_entry = QLineEdit("")
-            self.min_jump_entry.setToolTip(
-                "Absolute minimum step (in pA) to count as a baseline jump.\n"
-                "Leave blank to use the automatic threshold (Jump sensitivity).\n"
-                "Set e.g. 20 to only flatten large jumps and leave openings alone."
-            )
-            self.selection_layout.addRow("Min jump size [pA]", self.min_jump_entry)
         # "Offset" needs no extra widgets
         self.layout.insertLayout(1, self.selection_layout)
 
-        # the Piezo/Intervals selection only applies to the fitted corrections;
-        # the running-percentile and PELT methods estimate the baseline from the
-        # whole trace
-        self.set_selection_enabled(
-            method not in ("Running Percentile", "PELT Jump Correction")
-        )
+        # the Piezo/Intervals selection applies to both fitted corrections
+        self.set_selection_enabled(True)
 
     def set_selection_enabled(self, enabled):
-        """Enable or disable the Piezo/Intervals selection row (it does not
-        apply to the running-percentile method)."""
+        """Enable or disable the Piezo/Intervals selection row."""
         if not hasattr(self, "selection_box"):
             # selection widgets are created after the first method call
             return
@@ -353,54 +293,31 @@ class BaselineWidget(VerticalContainerWidget):
 
     def ok_clicked(self):
         method = self.method_options[self.method_box.currentIndex()]
-        if method == "Running Percentile":
-            window_unit = self.window_unit_entry.currentText()
-            window_duration = (
-                float(self.window_entry.text()) / TIME_UNIT_FACTORS[window_unit]
-            )
-            self.main.data.baseline_correction_running_percentile(
-                window_duration=window_duration,
-                percentile=float(self.percentile_entry.text()),
-            )
-        elif method == "PELT Jump Correction":
-            # blank min-jump field -> automatic threshold; a value is an absolute
-            # threshold entered in pA, converted to the trace's base unit (A)
-            min_jump_text = self.min_jump_entry.text().strip()
-            if min_jump_text:
-                min_jump_size = float(min_jump_text) / CURRENT_UNIT_FACTORS["pA"]
-            else:
-                min_jump_size = None
-            self.main.data.baseline_correction_pelt(
-                percentile=float(self.percentile_entry.text()),
-                jump_sensitivity=float(self.sensitivity_entry.text()),
-                min_jump_size=min_jump_size,
-            )
+        if method != "Offset":
+            degree = int(self.degree_entry.text())
         else:
-            if method != "Offset":
-                degree = int(self.degree_entry.text())
-            else:
-                degree = None
-            selection = self.selection_options[self.selection_box.currentIndex()]
-            if selection == "Piezo":
-                intervals = None
-                deviation = float(self.deviation_entry.text())
-                active = self.active_checkbox.isChecked()
-                time_unit = None
-            elif selection == "Intervals":
-                active = None
-                deviation = None
-                intervals = string_to_list(self.interval_entry.text())
-                time_unit = self.time_unit_entry.currentText()
+            degree = None
+        selection = self.selection_options[self.selection_box.currentIndex()]
+        if selection == "Piezo":
+            intervals = None
+            deviation = float(self.deviation_entry.text())
+            active = self.active_checkbox.isChecked()
+            time_unit = None
+        elif selection == "Intervals":
+            active = None
+            deviation = None
+            intervals = string_to_list(self.interval_entry.text())
+            time_unit = self.time_unit_entry.currentText()
 
-            self.main.data.baseline_correction(
-                method=method,
-                degree=degree,
-                intervals=intervals,
-                selection=selection,
-                deviation=deviation,
-                active=active,
-                time_unit=time_unit,
-            )
+        self.main.data.baseline_correction(
+            method=method,
+            degree=degree,
+            intervals=intervals,
+            selection=selection,
+            deviation=deviation,
+            active=active,
+            time_unit=time_unit,
+        )
         self.main.ep_frame.update_combo_box()
         self.main.plot_frame.plot_all()
         self.dialog.close()
